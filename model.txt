@@ -1,0 +1,9 @@
+family=bernoulli
+link=logit
+nrows=100
+ncols=3
+formula=z+(1|fexplog(x,y))
+colnames=x y z
+covariance=-1 -1
+mean=0 0
+niter=50

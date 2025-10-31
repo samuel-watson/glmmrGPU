@@ -1,14 +1,19 @@
 ﻿cmake_minimum_required(VERSION 3.18)
 project(glmmrGPU LANGUAGES CXX CUDA VERSION 1.0.0)
 
+if(MSVC)
+    add_compile_options($<$<COMPILE_LANGUAGE:CXX>:/bigobj>)
+    message(STATUS "MSVC detected: enabling /bigobj flag")
+endif()
+
 # Options
 option(BUILD_SHARED_LIBS "Build shared libraries" OFF)
 option(ENABLE_TESTS "Build tests" OFF)
 option(ENABLE_BENCHMARKS "Build benchmarks" OFF)
 
 # Set standards
-set(CMAKE_CXX_STANDARD 14)
-set(CMAKE_CUDA_STANDARD 14)
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CUDA_STANDARD 17)
 
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
@@ -29,13 +34,100 @@ endif()
 # Find packages
 find_package(CUDAToolkit REQUIRED)
 
-set(EIGEN3_INCLUDE_DIR "C:/cpp/eigen/eigen-3.4.0" CACHE PATH "Path to Eigen3")
+# Create directory for external dependencies
+set(DEPS_DIR ${CMAKE_BINARY_DIR}/_deps)
+file(MAKE_DIRECTORY ${DEPS_DIR})
 
-if(NOT EXISTS ${EIGEN3_INCLUDE_DIR}/Eigen/Dense)
-    message(FATAL_ERROR "Eigen3 not found at ${EIGEN3_INCLUDE_DIR}. Please set EIGEN3_INCLUDE_DIR")
+# ===== Download and extract Eigen =====
+set(EIGEN_DIR ${DEPS_DIR}/eigen)
+if(NOT EXISTS ${EIGEN_DIR}/Eigen/Dense)
+    message(STATUS "Downloading Eigen...")
+    file(DOWNLOAD
+        https://gitlab.com/libeigen/eigen/-/archive/3.4.0/eigen-3.4.0.tar.gz
+        ${DEPS_DIR}/eigen.tar.gz
+        SHOW_PROGRESS
+    )
+    
+    message(STATUS "Extracting Eigen...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xzf ${DEPS_DIR}/eigen.tar.gz
+        WORKING_DIRECTORY ${DEPS_DIR}
+    )
+    
+    file(RENAME ${DEPS_DIR}/eigen-3.4.0 ${EIGEN_DIR})
 endif()
 
-message(STATUS "Using Eigen3 from: ${EIGEN3_INCLUDE_DIR}")
+# ===== Download and extract Boost =====
+set(BOOST_EXTRACT_DIR ${DEPS_DIR}/boost-extract)
+set(BOOST_DIR ${DEPS_DIR}/boost)
+
+if(NOT EXISTS ${BOOST_DIR}/boost/version.hpp)
+    message(STATUS "Downloading Boost (150MB, may take a few minutes)...")
+    
+    # Try SourceForge (more reliable for pre-built archives)
+    file(DOWNLOAD
+        https://sourceforge.net/projects/boost/files/boost/1.83.0/boost_1_83_0.tar.gz
+        ${DEPS_DIR}/boost.tar.gz
+        SHOW_PROGRESS
+        TIMEOUT 600
+    )
+    
+    message(STATUS "Extracting Boost...")
+    execute_process(
+        COMMAND ${CMAKE_COMMAND} -E tar xzf ${DEPS_DIR}/boost.tar.gz
+        WORKING_DIRECTORY ${DEPS_DIR}
+    )
+    
+    # Check what was extracted
+    file(GLOB BOOST_EXTRACTED "${DEPS_DIR}/boost_*")
+    if(BOOST_EXTRACTED)
+        list(GET BOOST_EXTRACTED 0 BOOST_EXTRACTED_DIR)
+        message(STATUS "Found extracted Boost at: ${BOOST_EXTRACTED_DIR}")
+        
+        # Rename to standard location
+        if(EXISTS ${BOOST_EXTRACTED_DIR})
+            file(RENAME ${BOOST_EXTRACTED_DIR} ${BOOST_DIR})
+        endif()
+    endif()
+endif()
+
+# Verify Boost structure and find boost/version.hpp
+message(STATUS "Looking for Boost headers...")
+
+# Check various possible locations
+set(POSSIBLE_BOOST_PATHS
+    ${BOOST_DIR}
+    ${BOOST_DIR}/boost
+    ${DEPS_DIR}/boost_1_83_0
+)
+
+set(BOOST_FOUND FALSE)
+foreach(path ${POSSIBLE_BOOST_PATHS})
+    if(EXISTS ${path}/boost/version.hpp)
+        set(BOOST_INCLUDE_DIR ${path})
+        set(BOOST_FOUND TRUE)
+        message(STATUS "✓ Found boost/version.hpp at: ${BOOST_INCLUDE_DIR}")
+        break()
+    endif()
+endforeach()
+
+if(NOT BOOST_FOUND)
+    # Debug: List what we actually have
+    message(STATUS "Searching in ${DEPS_DIR}:")
+    file(GLOB_RECURSE VERSION_FILES "${DEPS_DIR}/*/version.hpp")
+    foreach(file ${VERSION_FILES})
+        message(STATUS "  Found version.hpp at: ${file}")
+    endforeach()
+    
+    message(FATAL_ERROR "Could not find boost/version.hpp in any expected location")
+endif()
+
+# Verify Eigen
+if(NOT EXISTS ${EIGEN_DIR}/Eigen/Dense)
+    message(FATAL_ERROR "Eigen/Dense not found at ${EIGEN_DIR}")
+else()
+    message(STATUS "✓ Found Eigen/Dense at: ${EIGEN_DIR}")
+endif()
 
 # Create library (reusable)
 add_library(cuda_cholesky_lib
@@ -44,7 +136,8 @@ add_library(cuda_cholesky_lib
 
 target_include_directories(cuda_cholesky_lib PUBLIC
     ${CMAKE_SOURCE_DIR}/include
-    ${EIGEN3_INCLUDE_DIR}
+    ${EIGEN_DIR}
+    ${BOOST_INCLUDE_DIR}
 )
 
 target_link_libraries(cuda_cholesky_lib PUBLIC
@@ -61,6 +154,7 @@ set_target_properties(cuda_cholesky_lib PROPERTIES
 # Create executable
 add_executable(glmmrGPU src/main.cpp)
 target_link_libraries(glmmrGPU PRIVATE cuda_cholesky_lib)
+
 
 get_target_property(SOURCES glmmrGPU SOURCES)
 message(STATUS "Target sources:")

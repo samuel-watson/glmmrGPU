@@ -31,6 +31,8 @@
         } \
     } while(0)
 
+
+
 void gpu_chol_solve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X) {
     // Initialize cuSolver
     const int n = A.rows();
@@ -61,7 +63,6 @@ void gpu_chol_solve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::M
     CUDA_CHECK(cudaMalloc(&d_work, lwork * sizeof(double)));
 
     // Perform Cholesky factorization
-    std::cout << "Performing Cholesky factorization..." << std::endl;
     CUSOLVER_CHECK(cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER,
         n, d_A, n, d_work, lwork, d_info));
 
@@ -73,7 +74,6 @@ void gpu_chol_solve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::M
     }
 
     // Solve AX = B for all right-hand sides simultaneously
-    std::cout << "Solving AX = B for all " << nrhs << " right-hand sides..." << std::endl;
     CUSOLVER_CHECK(cusolverDnDpotrs(
         handle,
         CUBLAS_FILL_MODE_LOWER,
@@ -130,7 +130,6 @@ void gpu_chol(const Eigen::MatrixXd& A, Eigen::MatrixXd& X) {
     CUDA_CHECK(cudaMalloc(&d_work, lwork * sizeof(double)));
 
     // Perform Cholesky factorization
-    std::cout << "Performing Cholesky factorization..." << std::endl;
     CUSOLVER_CHECK(cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER,
         n, d_A, n, d_work, lwork, d_info));
 
@@ -184,7 +183,6 @@ void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eig
     CUDA_CHECK(cudaMalloc(&d_work, lwork * sizeof(double)));
 
     // Perform Cholesky factorization
-    std::cout << "Performing Cholesky factorization..." << std::endl;
     CUSOLVER_CHECK(cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER,
         n, d_A, n, d_work, lwork, d_info));
 
@@ -196,7 +194,6 @@ void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eig
     }
 
     // Solve AX = B for all right-hand sides simultaneously
-    std::cout << "Solving AX = B for all " << nrhs << " right-hand sides..." << std::endl;
     CUSOLVER_CHECK(cusolverDnDpotrs(
         handle,
         CUBLAS_FILL_MODE_LOWER,
@@ -275,6 +272,54 @@ void gpu_multiply(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::Mat
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
     CUDA_CHECK(cudaFree(d_C));
+
+}
+
+void gpu_gram_matrix(const Eigen::MatrixXd& A, Eigen::MatrixXd& X) {
+    // Compute C = A^T * A
+    // A is m x n
+    // C is n x n (symmetric)
+    const int m = A.rows();
+    const int n = A.cols();
+
+    cublasHandle_t handle;
+    CUBLAS_CHECK(cublasCreate(&handle));
+
+    double* d_A = nullptr;
+    double* d_C = nullptr;
+
+    CUDA_CHECK(cudaMalloc(&d_A, m * n * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_C, m * m * sizeof(double)));
+
+    CUDA_CHECK(cudaMemcpy(d_A, A.data(), m * n * sizeof(double), cudaMemcpyHostToDevice));
+
+    double alpha = 1.0;
+    double beta = 0.0;
+
+    // C = alpha * A * A^T + beta * C
+    CUBLAS_CHECK(cublasDgemm(
+        handle,
+        CUBLAS_OP_N,    // Don't transpose first argument (A)
+        CUBLAS_OP_T,    // Transpose second argument (A^T)
+        m,              // Rows of result C
+        m,              // Columns of result C
+        n,              // Inner dimension
+        &alpha,
+        d_A,            // First matrix A
+        m,              // Leading dimension of A
+        d_A,            // Second matrix A (will be transposed)
+        m,              // Leading dimension of A
+        &beta,
+        d_C,            // Result matrix C
+        m               // Leading dimension of C
+    ));
+
+    CUDA_CHECK(cudaMemcpy(X.data(), d_C, m * m * sizeof(double), cudaMemcpyDeviceToHost));
+
+    CUDA_CHECK(cudaFree(d_A));
+    CUDA_CHECK(cudaFree(d_C));
+    CUBLAS_CHECK(cublasDestroy(handle));
+
 
 }
 
