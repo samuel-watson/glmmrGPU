@@ -86,6 +86,37 @@ cmake .. -G "Visual Studio 16 2019" -A x64
 .\Release\glmmrGPU.exe C:\Projects\glmmrGPU\data
 ```
 
+## Building on Linux
+
+### Standard Build
+```bash
+# From project root
+mkdir build
+cd build
+cmake ..
+make -j$(nproc)
+```
+
+### Build Types
+
+**Release (optimized):**
+```bash
+cmake -DCMAKE_BUILD_TYPE=Release ..
+make -j$(nproc)
+```
+
+**Debug (with debug symbols):**
+```bash
+cmake -DCMAKE_BUILD_TYPE=Debug ..
+make -j$(nproc)
+
+### Run the program
+Linux:
+```bash
+./glmmrGPU ../data
+./glmmrGPU /home/user/data
+```
+
 ## Project Structure
 ```
 glmmrGPU/
