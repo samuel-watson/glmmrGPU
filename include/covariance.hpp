@@ -45,7 +45,8 @@ class CovarianceLLT {
 public:
     MatrixXd L;
   
-  CovarianceLLT(const SparseMatrix<double>& matD){
+  CovarianceLLT(const MatrixXd& matD) : L(matD.rows(), matD.cols()) {
+      L.setZero();
     compute(matD);
   }
   
@@ -54,18 +55,18 @@ public:
   VectorXd solve(const VectorXd& x) const {
       MatrixXd B = MatrixXd::Map(x.data(), x.size(), 1);
       MatrixXd X(L.rows(), 1);
-     gpu_chol_solve_existing(L.data(),B,X);
+     gpu_chol_solve_existing(L,B,X);
      return X;
   }
   
   MatrixXd solve(const MatrixXd& x) const {
       MatrixXd sol(L.rows(), x.cols());
-      gpu_chol_solve_existing(L.data(), x, sol);
+      gpu_chol_solve_existing(L, x, sol);
       return sol;
   }
 
   void solve(const MatrixXd& x, MatrixXd& sol) const {
-      gpu_chol_solve_existing(L.data(), x, sol);
+      gpu_chol_solve_existing(L, x, sol);
   }
   
   MatrixXd matrixL() const {
@@ -87,9 +88,10 @@ public:
   void compute(const MatrixXd& matD){
       if (L.rows() != matD.rows() || L.cols() != matD.cols()) {
           L.resize(matD.rows(), matD.cols());
-          L.setZero();
       }
+      L.setZero();
       gpu_chol(matD, L);
+      L.triangularView<Eigen::StrictlyUpper>().setZero();
   }
 };
 
@@ -146,8 +148,9 @@ public:
   virtual SparseMatrix<double>    Z_sparse();
   strvec            parameter_names();
   virtual void      derivatives(std::vector<MatrixXd>& derivs,int order = 1);
-  virtual void      nr_step(const MatrixXd &umat, ArrayXd& logl, bool tr_approx = false);
+  virtual void      nr_step(const MatrixXd &umat, ArrayXd& logl);
   void              linear_predictor_ptr(glmmr::LinearPredictor* ptr);
+  VectorXd          L_solve(const VectorXd& x);
   
 protected:
   // data
@@ -1052,7 +1055,7 @@ inline bool glmmr::Covariance::any_log_re() const{
 }
 
 
-inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl, bool tr_approx){
+inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   static const double LOG_2PI = log(2*M_PI);
   static const double NEG_HALF_LOG_2PI = -0.5 * LOG_2PI;
   std::vector<MatrixXd> derivs;
@@ -1173,3 +1176,9 @@ inline strvec glmmr::Covariance::parameter_names(){
   }
   return parnames;
 };
+
+inline VectorXd glmmr::Covariance::L_solve(const VectorXd& x)
+{
+    VectorXd v = matL.solve(x);
+    return v;
+}

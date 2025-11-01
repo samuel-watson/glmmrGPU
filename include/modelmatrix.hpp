@@ -242,9 +242,6 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::Sigma(bool inverse){
 template<typename modeltype>
 inline MatrixXd glmmr::ModelMatrix<modeltype>::sigma_block(int b,
                                                            bool inverse){
-#if defined(ENABLE_DEBUG) && defined(R_BUILD)
-  if(b >= sigma_blocks.size())Rcpp::stop("Index out of range");
-#endif
   // UPDATE THIS TO NOT USE SPARSE IF DESIRED
   MatrixXd ZLs = model.covariance.ZL();
   ArrayXi rows = Map<ArrayXi,Unaligned>(sigma_blocks[b].RowIndexes.data(),sigma_blocks[b].RowIndexes.size());
@@ -254,9 +251,14 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::sigma_block(int b,
     S(i,i)+= 1/W.W()(sigma_blocks[b].RowIndexes[i]);
   }
   if(inverse){
-    S = S.llt().solve(MatrixXd::Identity(S.rows(),S.cols()));
+      MatrixXd SI = MatrixXd::Identity(S.rows(), S.cols());
+      gpu_inverse_solve_in_place(S, SI);
+      return SI;
   }
-  return S;
+  else {
+      return S;
+  }
+  
 }
 
 template<typename modeltype>
@@ -1305,12 +1307,11 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     MatrixXd LPb(Pb.rows(), Pb.cols());
     auto Pbt = Pb.selfadjointView<Eigen::Lower>();
     gpu_chol(Pbt, LPb);
-    gpu_chol_solve_existing(LPb.data(), yb, Mb);
-    gpu_chol_solve_existing(LPb.data(), I, Vb);
+    gpu_chol_solve_existing(LPb, yb, Mb);
+    gpu_chol_solve_existing(LPb, I, Vb);
   } else {
     // // Initial setup
     Mb.col(0) = re.u_.rowwise().mean();
-    std::cout << "\nU start: " << Mb.col(0).transpose();
     MatrixXd bnew(Mb);
     MatrixXd WZL(W_.size(),n_cols);
     MatrixXd LWL = MatrixXd::Identity(n_cols,n_cols);
@@ -1321,7 +1322,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     
     while(diff > tol && itero < 10) {
       eta = xb + (ZL * Mb.col(0)).array();
-      std::cout << "\neta: " << eta.transpose();
       if(model.family.family == Fam::binomial || model.family.family == Fam::bernoulli) {
         // Numerically stable sigmoid computation
         ArrayXd exp_neg_eta = (-eta).exp();
@@ -1338,15 +1338,14 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
       WZL = (ZL.array().colwise() * W_.array()).matrix();
       gpu_multiply(ZL.transpose(), WZL, LWL);
       LWL.diagonal().array() += 1.0;
-      std::cout << "\nLWL:\n" << LWL.topLeftCorner(5, 5);
       yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
       gpu_chol(LWL, LLWL);
-      gpu_chol_solve_existing(LLWL.data(), yb, bnew);
+      gpu_chol_solve_existing(LLWL, yb, bnew);
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);
     }
-    gpu_chol_solve_existing(LLWL.data(), I, Vb);
+    gpu_chol_solve_existing(LLWL, I, Vb);
   }
   
   // Optimized random number generation

@@ -41,6 +41,7 @@ public:
   virtual void    update_u(const MatrixXd &u_, bool append = false);
   virtual void    reset_u(); // just resets the random effects samples to zero
   virtual void    set_trace(int trace_);
+  void            fit(const int niter, const int max_iter);
   virtual dblpair marginal(const MarginType type,
                              const std::string& x,
                              const strvec& at,
@@ -150,6 +151,43 @@ template<typename modeltype>
 inline void glmmr::Model<modeltype>::set_trace(int trace_){
   optim.trace = trace_;
   model.trace = trace_;
+}
+
+template<typename modeltype>
+inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter)
+{
+    bool converged = false;    
+    int iter = 1;
+    dblpair ll, lldiff;
+    double lltot, llvartot, prob;
+    // start at ml values
+    optim.template ml_beta<BOBYQA>();
+    VectorXd beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
+    VectorXd theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
+    std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
+    while (!converged && iter <= max_iter) {
+        matrix.posterior_u_samples(niter);
+        optim.nr_beta();
+        optim.nr_theta();
+        beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
+        theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
+        ll = optim.current_likelihood_values();
+        std::cout << "\nITER: " << iter << " ------------";
+        std::cout << "\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
+        std::cout << "\nu: " << re.u_.topLeftCorner(5,5);
+        std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second;
+        if (iter > 1) {
+            lldiff = optim.u_diagnostic();
+            llvartot = optim.ll_diff_variance(true, true);
+            std::cout << "\nLog-likelihood differences: " << lldiff.first << " | " << lldiff.second;
+            lltot = lldiff.first + lldiff.second;
+            converged = lltot + 1.96 * llvartot / sqrt((double)niter) < 0;
+            prob = 1.0 - 0.5 * erfc(-1.0 * M_SQRT1_2 * lltot / sqrt((double)niter));
+            std::cout << "\nLog-likelihood variance: " << llvartot << " | Probability: " << prob*100 << "%" << std::endl;
+            if (converged) std::cout << "\nCONVERGED!";
+        }
+        iter++;
+    }
 }
 
 // marginal effects:

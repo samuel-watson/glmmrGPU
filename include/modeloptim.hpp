@@ -43,7 +43,7 @@ public:
     double  alpha = 0.8;
     bool    saem = false;
     bool    pr_average = true;
-    bool    reml = true;
+    bool    reml = false;
   } control;
   
   // functions
@@ -57,7 +57,7 @@ public:
   virtual double  log_likelihood();
   virtual double  full_log_likelihood();
   virtual void    nr_beta();
-  virtual void    nr_theta(bool tr_approx = false);
+  virtual void    nr_theta();
   virtual void    update_var_par(const double& v);
   virtual void    update_var_par(const ArrayXd& v);
   template<class algo, typename = std::enable_if_t<std::is_base_of<optim_algo, algo>::value> >
@@ -812,7 +812,7 @@ inline void glmmr::ModelOptim<modeltype>::nr_beta(){
 }
 
 template<typename modeltype>
-inline void glmmr::ModelOptim<modeltype>::nr_theta(bool tr_approx){
+inline void glmmr::ModelOptim<modeltype>::nr_theta(){
   if(control.reml)throw std::runtime_error("Newton-Raphson not compatible with REML for covariance parameters");
   if(re.scaled_u_.cols() != re.u_.cols())re.scaled_u_.resize(NoChange,re.u_.cols());
   if(ll_current.rows() != re.u_.cols())ll_current.resize(re.u_.cols(),NoChange);
@@ -821,7 +821,7 @@ inline void glmmr::ModelOptim<modeltype>::nr_theta(bool tr_approx){
   
   re.scaled_u_ = model.covariance.Lu(re.u_);  
   ArrayXd  tmp(ll_current.rows());
-  model.covariance.nr_step(re.scaled_u_, tmp, tr_approx);
+  model.covariance.nr_step(re.scaled_u_, tmp);
   ll_current.col(1) = tmp;
   current_ll_values.second = ll_current.col(1).mean();
   current_ll_var.second = (ll_current.col(1) - ll_current.col(1).mean()).square().sum() / (ll_current.col(1).size() - 1);
@@ -829,12 +829,11 @@ inline void glmmr::ModelOptim<modeltype>::nr_theta(bool tr_approx){
 }
 
 template<>
-inline void glmmr::ModelOptim<bits_hsgp>::nr_theta(bool tr_approx){
+inline void glmmr::ModelOptim<bits_hsgp>::nr_theta(){
   if(control.reml)throw std::runtime_error("Newton-Raphson not compatible with REML for covariance parameters");
   if(re.scaled_u_.cols() != re.u_.cols())re.scaled_u_.resize(NoChange,re.u_.cols());
   previous_ll_values.second = current_ll_values.second;
   previous_ll_var.second = current_ll_var.second;
-  (void) tr_approx;
   
   // Pre-cache frequently accessed members
   const int n_iter = re.u_.cols();

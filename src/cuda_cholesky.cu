@@ -105,6 +105,78 @@ void gpu_chol_solve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::M
 
 }
 
+void gpu_inverse_solve_in_place(const Eigen::MatrixXd& A, Eigen::MatrixXd& B) {
+    // Initialize cuSolver
+    const int n = A.rows();
+    const int nrhs = B.cols();
+    cusolverDnHandle_t handle;
+    CUSOLVER_CHECK(cusolverDnCreate(&handle));
+
+    // Allocate device memory
+    double* d_A = nullptr;
+    double* d_B = nullptr;  // This will store B as input and X as output
+    int* d_info = nullptr;
+
+    CUDA_CHECK(cudaMalloc(&d_A, n * n * sizeof(double)));
+    CUDA_CHECK(cudaMalloc(&d_B, n * nrhs * sizeof(double)));  // n x nrhs matrix
+    CUDA_CHECK(cudaMalloc(&d_info, sizeof(int)));
+
+    // Copy data to device
+    CUDA_CHECK(cudaMemcpy(d_A, A.data(), n * n * sizeof(double),
+        cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double),
+        cudaMemcpyHostToDevice));
+
+    // Query workspace size and allocate
+    int lwork = 0;
+    CUSOLVER_CHECK(cusolverDnDpotrf_bufferSize(handle, CUBLAS_FILL_MODE_LOWER,
+        n, d_A, n, &lwork));
+    double* d_work = nullptr;
+    CUDA_CHECK(cudaMalloc(&d_work, lwork * sizeof(double)));
+
+    // Perform Cholesky factorization
+    CUSOLVER_CHECK(cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER,
+        n, d_A, n, d_work, lwork, d_info));
+
+    int info_h = 0;
+    CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
+
+    if (info_h != 0) {
+        std::cerr << "Cholesky factorization failed!" << std::endl;
+    }
+
+    // Solve AX = B for all right-hand sides simultaneously
+    CUSOLVER_CHECK(cusolverDnDpotrs(
+        handle,
+        CUBLAS_FILL_MODE_LOWER,
+        n,
+        nrhs,     // Number of columns in B (and X)
+        d_A,      // Factorized matrix
+        n,        // Leading dimension of A
+        d_B,      // Input: B matrix, Output: X matrix
+        n,        // Leading dimension of B (number of rows)
+        d_info
+    ));
+
+    CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
+
+    if (info_h != 0) {
+        std::cerr << "Linear solve failed!" << std::endl;
+    }
+
+    // Copy solution matrix X back to host
+    CUDA_CHECK(cudaMemcpy(B.data(), d_B, n * nrhs * sizeof(double),
+        cudaMemcpyDeviceToHost));
+
+    // Cleanup
+    CUDA_CHECK(cudaFree(d_A));
+    CUDA_CHECK(cudaFree(d_B));
+    CUDA_CHECK(cudaFree(d_work));
+    CUDA_CHECK(cudaFree(d_info));
+    CUSOLVER_CHECK(cusolverDnDestroy(handle));
+
+}
+
 void gpu_chol(const Eigen::MatrixXd& A, Eigen::MatrixXd& X) {
     // Initialize cuSolver
     const int n = A.rows();
@@ -153,7 +225,7 @@ void gpu_chol(const Eigen::MatrixXd& A, Eigen::MatrixXd& X) {
 
 }
 
-void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eigen::MatrixXd& X) {
+void gpu_chol_solve_existing(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X) {
     // Initialize cuSolver
     const int n = B.rows();
     const int nrhs = B.cols();
@@ -170,29 +242,11 @@ void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eig
     CUDA_CHECK(cudaMalloc(&d_info, sizeof(int)));
 
     // Copy data to device
-    CUDA_CHECK(cudaMemcpy(d_A, A_data, n * n * sizeof(double),
+    CUDA_CHECK(cudaMemcpy(d_A, A.data(), n * n * sizeof(double),
         cudaMemcpyHostToDevice));
-    CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double),
+   CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double),
         cudaMemcpyHostToDevice));
-
-    // Query workspace size and allocate
-    int lwork = 0;
-    CUSOLVER_CHECK(cusolverDnDpotrf_bufferSize(handle, CUBLAS_FILL_MODE_LOWER,
-        n, d_A, n, &lwork));
-    double* d_work = nullptr;
-    CUDA_CHECK(cudaMalloc(&d_work, lwork * sizeof(double)));
-
-    // Perform Cholesky factorization
-    CUSOLVER_CHECK(cusolverDnDpotrf(handle, CUBLAS_FILL_MODE_LOWER,
-        n, d_A, n, d_work, lwork, d_info));
-
-    int info_h = 0;
-    CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
-
-    if (info_h != 0) {
-        std::cerr << "Cholesky factorization failed!" << std::endl;
-    }
-
+   
     // Solve AX = B for all right-hand sides simultaneously
     CUSOLVER_CHECK(cusolverDnDpotrs(
         handle,
@@ -206,6 +260,7 @@ void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eig
         d_info
     ));
 
+    int info_h = 0;
     CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
 
     if (info_h != 0) {
@@ -219,7 +274,6 @@ void gpu_chol_solve_existing(const double* A_data, const Eigen::MatrixXd& B, Eig
     // Cleanup
     CUDA_CHECK(cudaFree(d_A));
     CUDA_CHECK(cudaFree(d_B));
-    CUDA_CHECK(cudaFree(d_work));
     CUDA_CHECK(cudaFree(d_info));
     CUSOLVER_CHECK(cusolverDnDestroy(handle));
 

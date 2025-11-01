@@ -19,6 +19,11 @@ void writeToCSVfile(std::string name, const Eigen::MatrixBase<Derived>& matrix)
 Eigen::MatrixXd readMatrixFromCSV(std::string file, const int rows, const int cols) {
     std::ifstream in(file);
 
+    if (!in.is_open()) {
+        std::cerr << "ERROR: Could not open file: " << file << std::endl;
+        return MatrixXd::Zero(1,1);
+    }
+
     std::string line;
     int row = 0;
     int col = 0;
@@ -107,16 +112,21 @@ int main() {
 
     typedef glmmr::Model<glmmr::ModelBits<glmmr::Covariance, glmmr::LinearPredictor> > glmm;
     // read in the data 
+    /*
 #ifdef _DEBUG
     auto config = readConfig("C:/Users/samue/source/repos/glmmrGPU/model.txt");
 #else
     auto config = readConfig("model.txt");  // For release builds
-#endif
+#endif*/
+    auto config = readConfig("C:/Users/samue/source/repos/glmmrGPU/model.txt");
     std::string form = config["formula"];
     
     int nrows = std::stoi(config["nrows"]);
     int ncols = std::stoi(config["ncols"]);
     int niter = std::stoi(config["niter"]);
+    int maxiter = std::stoi(config["maxiter"]);
+    int predict = std::stoi(config["predict"]);
+    int offset = std::stoi(config["offset"]);
     std::string family = config["family"];
     std::string link = config["link"];
     std::vector<std::string> columns = splitString(config["colnames"]);
@@ -127,66 +137,110 @@ int main() {
     std::cout << "\nFormula: " << form << " nrows " << nrows << " ncols " << ncols;
     
     // data
+    /*
 #ifdef _DEBUG
     ArrayXXd data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/X.csv", nrows, ncols)).array();
     MatrixXd ymat = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/y.csv", nrows, 1);
 #else
     ArrayXXd data = (readMatrixFromCSV("data/data.csv", nrows, ncols)).array();
     MatrixXd ymat = readMatrixFromCSV("data/y.csv", nrows, 1);
-#endif
+#endif*/
+
+    ArrayXXd data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/X.csv", nrows, ncols)).array();
+    MatrixXd ymat = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/y.csv", nrows, 1);
+    
     
     VectorXd y = Map<VectorXd>(ymat.data(), ymat.rows());
-
-    std::cout << "\nData:\n" << data.topLeftCorner(10, 3);
-    std::cout << "\ny:\n" << y.head(10).transpose();
-    
+        
     glmm model(form, data, columns, family, link);
     model.model.linear_predictor.update_parameters(start_b);
     model.model.covariance.update_parameters(start_cov);
     model.set_y(y);
 
-    std::cout << "\nD:\n" << model.model.covariance.D().topLeftCorner(5, 5);
-    
+    MatrixXd offs(1, 1);
+    ArrayXXd trials(1, 1);
+    if (offset) {
+        offs.resize(data.rows(), NoChange);
+        offs = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/offset.csv", nrows, 1);
+        model.set_offset(offs.col(0));
+    }
+    if (family == "binomial") {
+        trials.resize(data.rows(), NoChange);
+        trials = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/trials.csv", nrows, 1);
+        model.model.data.set_variance(trials.col(0));
+    }
     // let's do one iteration
     auto t1 = high_resolution_clock::now();
-    model.matrix.posterior_u_samples(niter, 1e-6, false);
+    model.fit(niter, maxiter);
     auto t2 = high_resolution_clock::now();
 
-    std::cout << "\n U: \n" << model.re.u_.topLeftCorner(5, 5);
     duration<double, std::milli> ms_double = t2 - t1;
     std::cout << "\nTiming: " << ms_double.count() << "ms\n";
+
+    if (predict) {
+        int nrowpredict = std::stoi(config["nrowspred"]);
+        ArrayXXd pred_data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/Xp.csv", nrowpredict, ncols)).array();
+        ArrayXXd offset_new(nrowpredict, 1);
+        if (offset) {
+            offset_new = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/offsetp.csv", nrowpredict, 1)).array();
+        }
+        else {
+            offset_new.setZero();
+        }
+        VectorMatrix rep = model.re.predict_re(pred_data);
+        VectorXd xb = model.model.linear_predictor.predict_xb(pred_data, offset_new);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_u_mean.csv", rep.vec);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_u_var.csv", rep.mat);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_xb.csv", xb);
+    }
+
+    // write results to file
+    dblvec beta = model.model.linear_predictor.parameters;
+    dblvec theta = model.model.covariance.parameters_;
+    double var_par = model.model.data.var_par;
+    MatrixXd M(beta.size(), beta.size());
+    MatrixXd Mt(theta.size(), theta.size());
+    int se = std::stoi(config["se"]);
+    if (se) {
+        M = model.matrix.information_matrix();
+        Mt = model.matrix.template information_matrix_theta<glmmr::IM::EIM>();
+        M = M.llt().solve(MatrixXd::Identity(M.rows(), M.cols()));
+        Mt = Mt.llt().solve(MatrixXd::Identity(Mt.rows(), Mt.cols()));
+    }
+    else {
+        M.setZero();
+        Mt.setZero();
+    }
     
-    /*
-    const int n = 100;      // Matrix dimension
-    const int nrhs = n;
+    int dim = beta.size() + theta.size();
+    if (family == "gaussian")dim++;
+    MatrixXd result(dim, 2);
+    for (int i = 0; i < beta.size(); i++) {
+        result(i, 0) = beta[i];
+        result(i, 1) = sqrt(M(i, i));
+    }
+    for (int i = 0; i < theta.size(); i++) {
+        result(i + beta.size(), 0) = theta[i];
+        result(i + beta.size(), 1) = sqrt(Mt(i, i));
+    }
+    if (family == "gaussian") {
+        result(beta.size() + theta.size(), 0) = var_par;
+        result(beta.size() + theta.size(), 1) = 0;
+    }
 
-    //MatrixXd m = MatrixXd::Random(n, n);
-    //MatrixXd A = m * m.transpose();
-    //MatrixXd B = MatrixXd::Identity(n, n);
-    MatrixXd A = MatrixXd::Random(n, n);
-    MatrixXd B = MatrixXd::Random(n, n);
+    // need to add predict mode and return of U samples
 
-    // Verify with Eigen
-    auto t1 = high_resolution_clock::now();
-    MatrixXd X_expected = A * B;// A.llt().solve(B);
-    auto t2 = high_resolution_clock::now();
-    std::cout << "Expected solution X (from Eigen):\n" << X_expected.topLeftCorner(5, 5) << "\n" << std::endl;
-
-    duration<double, std::milli> ms_double = t2 - t1;
-    std::cout << ms_double.count() << "s\n";
-
-    MatrixXd X(n, n);
-
-    auto t3 = high_resolution_clock::now();
-    gpu_multiply(A, B, X);//gpu_chol(A, B, X);
-    auto t4 = high_resolution_clock::now();
-
-    std::cout << "Actual solution X\n" << X.topLeftCorner(5, 5) << "\n" << std::endl;
-    duration<double, std::milli> ms_double2 = t4 - t3;
-    std::cout << ms_double2.count() << "ms\n";
-
-    std::cout << "\nDifference from expected solution (Frobenius norm): "
-        << (X - X_expected).norm() << std::endl;
-    */
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/result.csv", result);
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/u.csv", model.re.zu_);
+/*
+#ifdef _DEBUG
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/result.csv", result);
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/u.csv", model.re.zu_);
+#else
+    writeToCSVfile("result.csv", result);
+    writeToCSVfile("u.csv", model.re.zu_);
+#endif*/
+    
+   
     return 0;
 }
