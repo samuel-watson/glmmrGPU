@@ -171,12 +171,12 @@ int main() {
     ArrayXXd trials(1, 1);
     if (offset) {
         offs.resize(data.rows(), NoChange);
-        offs = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/offset.csv", nrows, 1);
+        offs = readMatrixFromCSV("offset.csv", nrows, 1);
         model.set_offset(offs.col(0));
     }
     if (family == "binomial") {
         trials.resize(data.rows(), NoChange);
-        trials = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/trials.csv", nrows, 1);
+        trials = readMatrixFromCSV("trials.csv", nrows, 1);
         model.model.data.set_variance(trials.col(0));
     }
     // let's do one iteration
@@ -187,23 +187,27 @@ int main() {
     duration<double, std::milli> ms_double = t2 - t1;
     std::cout << "\nTiming: " << ms_double.count() << "ms\n";
 
-    /*
+    std::ofstream myfile;
+    myfile.open("time.txt");
+    myfile << ms_double.count() << "ms";
+    myfile.close();
+    
 
     if (predict) {
         int nrowpredict = std::stoi(config["nrowspred"]);
-        ArrayXXd pred_data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/Xp.csv", nrowpredict, ncols)).array();
+        ArrayXXd pred_data = (readMatrixFromCSV("Xp.csv", nrowpredict, ncols)).array();
         ArrayXXd offset_new(nrowpredict, 1);
         if (offset) {
-            offset_new = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/offsetp.csv", nrowpredict, 1)).array();
+            offset_new = (readMatrixFromCSV("offsetp.csv", nrowpredict, 1)).array();
         }
         else {
             offset_new.setZero();
         }
         VectorMatrix rep = model.re.predict_re(pred_data);
         VectorXd xb = model.model.linear_predictor.predict_xb(pred_data, offset_new);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_u_mean.csv", rep.vec);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_u_var.csv", rep.mat);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_xb.csv", xb);
+        writeToCSVfile("pred_u_mean.csv", rep.vec);
+        writeToCSVfile("pred_u_var.csv", rep.mat);
+        writeToCSVfile("pred_xb.csv", xb);
     }
 
     // write results to file
@@ -241,9 +245,9 @@ int main() {
     }
 
     // need to add predict mode and return of U samples
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/result.csv", result);
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/u.csv", model.re.zu_);
-    */
+    writeToCSVfile("result.csv", result);
+    writeToCSVfile("u.csv", model.re.zu_);
+    
    
     return 0;
 }

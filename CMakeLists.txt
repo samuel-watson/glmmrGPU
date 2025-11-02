@@ -65,7 +65,7 @@ if(NOT EXISTS ${EIGEN_DIR}/Eigen/Dense)
     file(RENAME ${DEPS_DIR}/eigen-3.4.0 ${EIGEN_DIR})
 endif()
 
-# ===== Download and extract Boost =====
+# ===== Download and extract Boost ====
 set(BOOST_EXTRACT_DIR ${DEPS_DIR}/boost-extract)
 set(BOOST_DIR ${DEPS_DIR}/boost)
 
@@ -149,7 +149,7 @@ target_include_directories(cuda_cholesky_lib PUBLIC
 )
 
 target_link_libraries(cuda_cholesky_lib PUBLIC
-    CUDA::cudart
+    CUDA::cudart_static
     CUDA::cusolver
     CUDA::cublas
 )
@@ -157,18 +157,21 @@ target_link_libraries(cuda_cholesky_lib PUBLIC
 set_target_properties(cuda_cholesky_lib PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     POSITION_INDEPENDENT_CODE ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
-
-
 
 # Create executable
 add_executable(glmmrGPU src/main.cpp)
 
-target_compile_options(cuda_cholesky_lib PRIVATE
-    $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>
+set_target_properties(glmmrGPU PROPERTIES
+    CUDA_SEPARABLE_COMPILATION ON
+    CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
-target_link_libraries(glmmrGPU PRIVATE cuda_cholesky_lib)
+target_link_libraries(glmmrGPU PRIVATE 
+    cuda_cholesky_lib
+    CUDA::cudart_static
+)
 
 get_target_property(SOURCES glmmrGPU SOURCES)
 message(STATUS "Target sources:")
