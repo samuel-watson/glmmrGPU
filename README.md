@@ -2,13 +2,13 @@
 
 GPU-accelerated mixed model fitting using CUDA, cuSolver, and Eigen.
 
-## Prerequisites - Windows
+## Prerequisites
 
 Before building, ensure you have the following installed:
 
 ### Required Software
 
-1. **Visual Studio 2019 or 2022** (Community Edition is free)
+1. (Windows) **Visual Studio 2019 or 2022** (Community Edition is free)
    - Download: https://visualstudio.microsoft.com/downloads/
    - During installation, select "Desktop development with C++"
    - Make sure to include the latest Windows SDK
@@ -16,18 +16,9 @@ Before building, ensure you have the following installed:
 2. **CUDA Toolkit 11.0 or later**
    - Download: https://developer.nvidia.com/cuda-downloads
    - Recommended: CUDA 12.x
-   - Verify installation:
-```powershell
-     nvcc --version
-```
 
 3. **CMake 3.18 or later**
    - Download: https://cmake.org/download/
-   - During installation, select "Add CMake to system PATH"
-   - Verify installation:
-```powershell
-     cmake --version
-```
 
 4. **Git** (optional, for cloning)
    - Download: https://git-scm.com/downloads
@@ -36,18 +27,14 @@ Before building, ensure you have the following installed:
 ### Hardware Requirements
 
 - NVIDIA GPU with compute capability 5.2 or higher
-- Verify your GPU:
-```powershell
-  nvidia-smi
-```
 
-## Quick Start
+## Quick Start -- Windows
 
 ### 1. Get the Code
 
 **Option A: Clone with Git**
 ```powershell
-git clone https://github.com/yourusername/glmmrGPU.git
+git clone https://github.com/samuel-watson/glmmrGPU.git
 cd glmmrGPU
 ```
 
@@ -57,6 +44,8 @@ cd glmmrGPU
 - Open PowerShell in that folder
 
 ### 2. Build the Project
+Note that the compilation will download Eigen and required Boost libraries. The Boost math libraries are relatively large and downloading may take some time.
+
 ```powershell
 # Create build directory
 mkdir build
@@ -76,14 +65,16 @@ cmake --build . --config Debug
 ```powershell
 cmake .. -G "Visual Studio 16 2019" -A x64
 ```
+### 3. Add Data
+The program requires data files to be in the directory of the executable. At a minimum these are model.txt, X.csv, and y.csv, which are described below. See the files in /data for an example.
 
-### 3. Run the Program
+### 4. Run the Program
 ```powershell
 # From the build directory
-.\Release\glmmrGPU.exe ..\data
+.\Release\glmmrGPU.exe 
 
 # Or with absolute path
-.\Release\glmmrGPU.exe C:\Projects\glmmrGPU\data
+.\Release\glmmrGPU.exe 
 ```
 
 ## Building on Linux
@@ -111,10 +102,11 @@ cmake -DCMAKE_BUILD_TYPE=Debug ..
 make -j$(nproc)
 
 ### Run the program
+
 Linux:
 ```bash
-./glmmrGPU ../data
-./glmmrGPU /home/user/data
+./glmmrGPU 
+./glmmrGPU 
 ```
 
 ## Project Structure
@@ -123,14 +115,14 @@ glmmrGPU/
 ├── CMakeLists.txt          # Build configuration
 ├── README.md               # This file
 ├── include/
-│   └── cuda_cholesky.h     # Public API
+│   └── cuda_cholesky.h     
 ├── src/
 │   ├── cuda_cholesky.cu    # CUDA implementation
 │   └── main.cpp            # Main program
 ├── data/                   # Input data files
-│   ├── matrix_A.txt
-│   ├── matrix_B.txt
-│   └── vector_b.txt
+│   ├── model.txt           # Example data files
+│   ├── X.csv
+│   └── y.csv
 └── build/                  # Build output (generated)
     ├── Debug/
     │   └── glmmrGPU.exe
@@ -138,70 +130,41 @@ glmmrGPU/
         └── glmmrGPU.exe
 ```
 
-## Advanced Options
+## Data
+The model data should be passed to the program through files placed in the folder with the program. 
 
-### Build with Specific CUDA Architecture
-
-If you want to target specific GPU architecture:
-```powershell
-cmake .. -G "Visual Studio 17 2022" -A x64 -DCMAKE_CUDA_ARCHITECTURES="86"
+### model.txt
 ```
-
-Common architectures:
-- `52` - GTX 900 series (Maxwell)
-- `61` - GTX 10 series (Pascal)
-- `75` - RTX 20 series (Turing)
-- `86` - RTX 30 series (Ampere)
-- `89` - RTX 40 series (Ada Lovelace)
-
-### Build with Custom Boost/Eigen
-
-If you have Boost or Eigen installed elsewhere:
-```powershell
-cmake .. -G "Visual Studio 17 2022" -A x64 ^
-    -DBOOST_ROOT="C:/Libraries/boost_1_83_0" ^
-    -DEIGEN3_INCLUDE_DIR="C:/Libraries/eigen"
+family=bernoulli
+link=logit
+nrows=2000
+ncols=3
+formula=z+(1|fexplog(x,y))
+colnames=x y z
+covariance=-1 -1
+mean=0 0
+niter=50
+maxiter=1
+offset=0
+predict=0
+nrowspred=0
+se=0
 ```
+### X.csv
+A csv file containing a matrix with the relevant covariates used to construct the fixed and random effects design matrices. Note that the columns of this matrix are identified by the colnames argument in the model.txt file.
 
-### Verbose Build Output
+### y.csv
+A csv file containing the vector of outcome data.
 
-To see detailed compilation commands:
-```powershell
-cmake --build . --config Release --verbose
-```
+### Other files
+The program also accepts:
+   - offset.csv   A vector containing the offset values. Set offset=1 in model.txt.
+   - trials.csv    A vector containing the number of trials for each observation if using family=binomial
+   - Xp.csv       A matrix of data for prediction. Set predict=0 to generate predictions.
+   - offsetp.csv  If predicting and using and offset, the prediction value offsets should be specified in this file.
 
-## Building in Visual Studio (GUI)
-
-If you prefer using Visual Studio IDE:
-
-1. **Generate solution:**
-```powershell
-   cmake -B build -G "Visual Studio 17 2022" -A x64
-```
-
-2. **Open solution:**
-```powershell
-   start build\glmmrGPU.sln
-```
-
-3. **In Visual Studio:**
-   - Select configuration (Debug/Release) from toolbar
-   - Press `Ctrl+Shift+B` to build
-   - Press `F5` to run with debugging
-
-## System Requirements
-
-### Minimum
-- Windows 10 (64-bit)
-- NVIDIA GPU with compute capability 5.2+
-- 16 GB RAM
-- 64 GB free disk space
-
-### Recommended
-- Windows 10/11 (64-bit)
-- NVIDIA RTX series GPU
-- 64 GB RAM
-- SSD with 5 GB free space
+### Outputs
+The program will write the results to a csv file (results.csv) in the same folder as the program which will be a table with the point estimates in the first column of fixed and covariance parameters, in that order and in the order they were specified, and the standard errors in the second column. The sampled random effect values are also written to u.csv. Predictions will also be included in this folder.
 
 ## License
 
