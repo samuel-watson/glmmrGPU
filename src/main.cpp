@@ -142,6 +142,8 @@ int main() {
     int predict = std::stoi(config["predict"]);
     check_in_map(config, "offset");
     int offset = std::stoi(config["offset"]);
+    check_in_map(config, "startbeta");
+    int start_ml_beta = std::stoi(config["startbeta"]);
     check_in_map(config, "family");
     std::string family = config["family"];
     check_in_map(config, "link");
@@ -181,7 +183,7 @@ int main() {
     }
     // let's do one iteration
     auto t1 = high_resolution_clock::now();
-    model.fit(niter, maxiter);
+    model.fit(niter, maxiter, (bool)start_ml_beta);
     auto t2 = high_resolution_clock::now();
 
     duration<double, std::milli> ms_double = t2 - t1;

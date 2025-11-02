@@ -41,7 +41,7 @@ public:
   virtual void    update_u(const MatrixXd &u_, bool append = false);
   virtual void    reset_u(); // just resets the random effects samples to zero
   virtual void    set_trace(int trace_);
-  void            fit(const int niter, const int max_iter);
+  void            fit(const int niter, const int max_iter, const bool start_ml_beta = true);
   virtual dblpair marginal(const MarginType type,
                              const std::string& x,
                              const strvec& at,
@@ -154,14 +154,14 @@ inline void glmmr::Model<modeltype>::set_trace(int trace_){
 }
 
 template<typename modeltype>
-inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter)
+inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, const bool start_ml_beta)
 {
     bool converged = false;    
     int iter = 1;
     dblpair ll, lldiff;
     double lltot, llvartot, prob;
     // start at ml values
-    optim.template ml_beta<BOBYQA>();
+    if(start_ml_beta) optim.template ml_beta<BOBYQA>();
     VectorXd beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
     VectorXd theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
     std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose() << std::endl;

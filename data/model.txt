@@ -12,3 +12,4 @@ offset=0
 predict=0
 nrowspred=0
 se=0
+startbeta=1
