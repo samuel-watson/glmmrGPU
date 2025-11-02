@@ -79,6 +79,17 @@ std::map<std::string, std::string> readConfig(const std::string& filename) {
     return config;
 }
 
+inline bool check_in_map(std::map<std::string, std::string>& config, std::string x) {
+    if (config.find("formula") == config.end()) {
+        std::cerr << x << " not in model.txt" << std::endl;
+        return false;
+    }
+    else {
+        return true;
+    }
+
+}
+
 std::vector<std::string> splitString(const std::string& str, char delimiter = ' ') {
     std::vector<std::string> result;
     std::istringstream iss(str);
@@ -103,6 +114,7 @@ std::vector<double> splitStringD(const std::string& str, char delimiter = ' ') {
     return result;
 }
 
+
 int main() {
     using namespace Eigen;
     using std::chrono::high_resolution_clock;
@@ -112,61 +124,59 @@ int main() {
 
     typedef glmmr::Model<glmmr::ModelBits<glmmr::Covariance, glmmr::LinearPredictor> > glmm;
     // read in the data 
-    /*
-#ifdef _DEBUG
-    auto config = readConfig("C:/Users/samue/source/repos/glmmrGPU/model.txt");
-#else
-    auto config = readConfig("model.txt");  // For release builds
-#endif*/
-    auto config = readConfig("C:/Users/samue/source/repos/glmmrGPU/model.txt");
-    std::string form = config["formula"];
+
+    auto config = readConfig("model.txt");
+
     
+    check_in_map(config, "formula");
+    std::string form = config["formula"];
+    check_in_map(config, "nrows");
     int nrows = std::stoi(config["nrows"]);
+    check_in_map(config, "ncols");
     int ncols = std::stoi(config["ncols"]);
+    check_in_map(config, "niter");
     int niter = std::stoi(config["niter"]);
+    check_in_map(config, "maxiter");
     int maxiter = std::stoi(config["maxiter"]);
+    check_in_map(config, "predict");
     int predict = std::stoi(config["predict"]);
+    check_in_map(config, "offset");
     int offset = std::stoi(config["offset"]);
+    check_in_map(config, "family");
     std::string family = config["family"];
+    check_in_map(config, "link");
     std::string link = config["link"];
+    check_in_map(config, "colnames");
     std::vector<std::string> columns = splitString(config["colnames"]);
+    check_in_map(config, "covariance");
     std::vector<double> start_cov = splitStringD(config["covariance"]);
+    check_in_map(config, "mean");
     std::vector<double> start_b = splitStringD(config["mean"]);
     //formula
 
     std::cout << "\nFormula: " << form << " nrows " << nrows << " ncols " << ncols;
+    std::cout << "\npredict: " << predict << " offset: " << offset;
     
     // data
-    /*
-#ifdef _DEBUG
-    ArrayXXd data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/X.csv", nrows, ncols)).array();
-    MatrixXd ymat = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/y.csv", nrows, 1);
-#else
-    ArrayXXd data = (readMatrixFromCSV("data/data.csv", nrows, ncols)).array();
-    MatrixXd ymat = readMatrixFromCSV("data/y.csv", nrows, 1);
-#endif*/
+    ArrayXXd data = (readMatrixFromCSV("X.csv", nrows, ncols)).array();
+    MatrixXd ymat = readMatrixFromCSV("y.csv", nrows, 1);   
+    VectorXd y = Map<VectorXd>(ymat.data(), ymat.rows());     
 
-    ArrayXXd data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/X.csv", nrows, ncols)).array();
-    MatrixXd ymat = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/y.csv", nrows, 1);
-    
-    
-    VectorXd y = Map<VectorXd>(ymat.data(), ymat.rows());
-        
-    glmm model(form, data, columns, family, link);
-    model.model.linear_predictor.update_parameters(start_b);
-    model.model.covariance.update_parameters(start_cov);
-    model.set_y(y);
-
+   glmm model(form, data, columns, family, link);
+   model.model.linear_predictor.update_parameters(start_b);
+   model.model.covariance.update_parameters(start_cov);
+   model.set_y(y);
+       
     MatrixXd offs(1, 1);
     ArrayXXd trials(1, 1);
     if (offset) {
         offs.resize(data.rows(), NoChange);
-        offs = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/offset.csv", nrows, 1);
+        offs = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/offset.csv", nrows, 1);
         model.set_offset(offs.col(0));
     }
     if (family == "binomial") {
         trials.resize(data.rows(), NoChange);
-        trials = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/trials.csv", nrows, 1);
+        trials = readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/trials.csv", nrows, 1);
         model.model.data.set_variance(trials.col(0));
     }
     // let's do one iteration
@@ -177,21 +187,23 @@ int main() {
     duration<double, std::milli> ms_double = t2 - t1;
     std::cout << "\nTiming: " << ms_double.count() << "ms\n";
 
+    /*
+
     if (predict) {
         int nrowpredict = std::stoi(config["nrowspred"]);
-        ArrayXXd pred_data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/Xp.csv", nrowpredict, ncols)).array();
+        ArrayXXd pred_data = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/Xp.csv", nrowpredict, ncols)).array();
         ArrayXXd offset_new(nrowpredict, 1);
         if (offset) {
-            offset_new = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/offsetp.csv", nrowpredict, 1)).array();
+            offset_new = (readMatrixFromCSV("C:/Users/samue/source/repos/glmmrGPU/data/offsetp.csv", nrowpredict, 1)).array();
         }
         else {
             offset_new.setZero();
         }
         VectorMatrix rep = model.re.predict_re(pred_data);
         VectorXd xb = model.model.linear_predictor.predict_xb(pred_data, offset_new);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_u_mean.csv", rep.vec);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_u_var.csv", rep.mat);
-        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/pred_xb.csv", xb);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_u_mean.csv", rep.vec);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_u_var.csv", rep.mat);
+        writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/pred_xb.csv", xb);
     }
 
     // write results to file
@@ -229,18 +241,9 @@ int main() {
     }
 
     // need to add predict mode and return of U samples
-
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/result.csv", result);
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/u.csv", model.re.zu_);
-/*
-#ifdef _DEBUG
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/result.csv", result);
-    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/u.csv", model.re.zu_);
-#else
-    writeToCSVfile("result.csv", result);
-    writeToCSVfile("u.csv", model.re.zu_);
-#endif*/
-    
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/result.csv", result);
+    writeToCSVfile("C:/Users/samue/source/repos/glmmrGPU/data/u.csv", model.re.zu_);
+    */
    
     return 0;
 }

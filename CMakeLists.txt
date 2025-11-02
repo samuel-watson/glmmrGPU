@@ -15,6 +15,14 @@ option(ENABLE_BENCHMARKS "Build benchmarks" OFF)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CUDA_STANDARD 17)
 
+if(MSVC)
+    set(CXX_RELEASE_FLAGS "/O2 /DNDEBUG")
+    set(CUDA_RELEASE_FLAGS "-O3 -use_fast_math")
+else()
+    set(CXX_RELEASE_FLAGS "-O3 -march=native -DNDEBUG")
+    set(CUDA_RELEASE_FLAGS "-O3 -use_fast_math")
+endif()
+
 # Build type
 if(NOT CMAKE_BUILD_TYPE)
     set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
@@ -151,10 +159,16 @@ set_target_properties(cuda_cholesky_lib PROPERTIES
     POSITION_INDEPENDENT_CODE ON
 )
 
+
+
 # Create executable
 add_executable(glmmrGPU src/main.cpp)
-target_link_libraries(glmmrGPU PRIVATE cuda_cholesky_lib)
 
+target_compile_options(cuda_cholesky_lib PRIVATE
+    $<$<COMPILE_LANGUAGE:CUDA>:-use_fast_math>
+)
+
+target_link_libraries(glmmrGPU PRIVATE cuda_cholesky_lib)
 
 get_target_property(SOURCES glmmrGPU SOURCES)
 message(STATUS "Target sources:")

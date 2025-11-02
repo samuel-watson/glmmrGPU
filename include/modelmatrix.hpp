@@ -251,13 +251,9 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::sigma_block(int b,
     S(i,i)+= 1/W.W()(sigma_blocks[b].RowIndexes[i]);
   }
   if(inverse){
-      MatrixXd SI = MatrixXd::Identity(S.rows(), S.cols());
-      gpu_inverse_solve_in_place(S, SI);
-      return SI;
+      S = S.llt().solve(MatrixXd::Identity(S.rows(), S.cols()));
   }
-  else {
-      return S;
-  }
+  return S;
   
 }
 
@@ -1284,16 +1280,16 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   default:
     throw std::runtime_error("Analtyic posterior only available with Gaussian, Poisson, and Binomial");
     break;
-  }
-  
+  } 
   
   MatrixXd ZL = model.covariance.ZL();
   const int n_cols = ZL.cols();
   MatrixXd Mb(n_cols,1);
   MatrixXd Vb(n_cols, n_cols);
-  MatrixXd I(n_cols, n_cols);
-  I.setIdentity();
+  Vb.setIdentity();
+  
   //LLT<MatrixXd> llt_Pb;
+  model.covariance.matL.store();
   
   if(model.family.family == Fam::gaussian) {
     // Use colwise multiplication (faster than diagonal matrix)
@@ -1305,10 +1301,9 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     MatrixXd yb(WZL.rows(), 1);
     yb.col(0) = WZL.transpose() * (model.data.y - xb.matrix());
     MatrixXd LPb(Pb.rows(), Pb.cols());
-    auto Pbt = Pb.selfadjointView<Eigen::Lower>();
-    gpu_chol(Pbt, LPb);
-    gpu_chol_solve_existing(LPb, yb, Mb);
-    gpu_chol_solve_existing(LPb, I, Vb);
+    model.covariance.matL.compute(Pb);
+    model.covariance.matL.solve(yb, Mb);
+    model.covariance.matL.solveInPlace(Vb);
   } else {
     // // Initial setup
     Mb.col(0) = re.u_.rowwise().mean();
@@ -1339,13 +1334,13 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
       gpu_multiply(ZL.transpose(), WZL, LWL);
       LWL.diagonal().array() += 1.0;
       yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
-      gpu_chol(LWL, LLWL);
-      gpu_chol_solve_existing(LLWL, yb, bnew);
+      model.covariance.matL.compute(LWL);
+      model.covariance.matL.solve(yb, bnew);
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);
     }
-    gpu_chol_solve_existing(LLWL, I, Vb);
+    model.covariance.matL.solveInPlace(Vb);
   }
   
   // Optimized random number generation
@@ -1362,23 +1357,24 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   
   // Extract lower triangular for random effect simulation
   MatrixXd LVb(Vb.rows(), Vb.cols());
-  gpu_chol(Vb, LVb);
+  model.covariance.matL.compute(Vb);
   
   bool action_append = append;
   if(append && re.u_.cols() == 1)action_append = false;
   if(action_append){
     int currcolsize = re.u_.cols();
-    unew = LVb * unew;
-    unew.colwise() += Mb.col(0);
+    MatrixXd unewm(re.u_.rows(), niter);
+    model.covariance.matL.productL(unew, unewm);
+    unewm.colwise() += Mb.col(0);
     re.u_.conservativeResize(NoChange,currcolsize + niter);
     re.zu_.conservativeResize(NoChange,currcolsize + niter);
-    re.u_.rightCols(niter).noalias() = unew;
+    re.u_.rightCols(niter).noalias() = unewm;
   } else {
     if(re.u_.cols() != niter){
       re.u_.resize(NoChange, niter);
       re.zu_.resize(NoChange, niter);
     }
-    gpu_multiply(LVb, unew, re.u_);
+    model.covariance.matL.productL(unew, re.u_);
     re.u_.colwise() += Mb.col(0);
   }
   if (ZL.rows() == ZL.cols()) {
@@ -1387,6 +1383,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   else {
       re.zu_ = model.covariance.ZLu(re.u_);
   }
-  
+  model.covariance.matL.reload();
 }
 

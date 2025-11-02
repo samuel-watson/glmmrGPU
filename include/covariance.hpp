@@ -13,6 +13,7 @@
 using namespace Eigen;
 
 namespace glmmr {
+       
 
 inline bool validate_fn(const str& fn){
   bool not_fn = str_to_covfunc.find(fn) == str_to_covfunc.end();
@@ -38,65 +39,81 @@ inline bool any_match(T t, Vals ...vals)
   return (... || (t == vals));
 }
 
-// Do we want to allow both CPU and GPU versions in this package?
-// It would require having the LLT class here as well. 
-
 class CovarianceLLT {
 public:
+    std::unique_ptr<GPUCholeskyManager> chol_;
     MatrixXd L;
+    const int Q;
   
-  CovarianceLLT(const MatrixXd& matD) : L(matD.rows(), matD.cols()) {
-      L.setZero();
-    compute(matD);
+  CovarianceLLT(const int Q_) : Q(Q_), L(Q_,Q_) {
+      chol_ = std::make_unique<GPUCholeskyManager>(Q);
   }
   
-  CovarianceLLT() : L(MatrixXd::Zero(1,1)) {};
-  
-  VectorXd solve(const VectorXd& x) const {
-      MatrixXd B = MatrixXd::Map(x.data(), x.size(), 1);
+  VectorXd solve(const VectorXd& x) {
       MatrixXd X(L.rows(), 1);
-     gpu_chol_solve_existing(L,B,X);
-     return X;
+      //X.col(0) = x;
+     chol_->solve(x, X);
+     return X.col(0);
   }
   
-  MatrixXd solve(const MatrixXd& x) const {
+  MatrixXd solve(const MatrixXd& x) {
       MatrixXd sol(L.rows(), x.cols());
-      gpu_chol_solve_existing(L, x, sol);
+      //sol = x;
+      chol_->solve(x, sol);
       return sol;
   }
 
-  void solve(const MatrixXd& x, MatrixXd& sol) const {
-      gpu_chol_solve_existing(L, x, sol);
+  void solveInPlace(MatrixXd& x) {
+      chol_->solveInPlace(x);
+  }
+
+  void solve(const MatrixXd& x, MatrixXd& sol) {
+      //sol = x;
+      chol_->solve(x, sol);
   }
   
-  MatrixXd matrixL() const {
+  MatrixXd matrixL() {
+      store();
       return L;
   }
   
-  MatrixXd productR(const MatrixXd& Z) const {
+  MatrixXd productR(const MatrixXd& Z) {
       MatrixXd prod(Z.rows(), L.cols());
-      gpu_multiply(Z, L, prod);
+      chol_->leftMultiplyByMatrix(Z, prod);
       return prod;
   }
   
-  MatrixXd productL(const MatrixXd& Z) const {
+  MatrixXd productL(const MatrixXd& Z) {
       MatrixXd prod(L.rows(), Z.cols());
-      gpu_multiply(L,Z, prod);
+      chol_->multiplyByMatrix(Z, prod);
       return prod;
+  }
+
+  void productR(const MatrixXd& Z, MatrixXd& prod) {
+      chol_->leftMultiplyByMatrix(Z, prod);
+  }
+
+  void productL(const MatrixXd& Z, MatrixXd& prod) {
+      chol_->multiplyByMatrix(Z, prod);
   }
   
   void compute(const MatrixXd& matD){
       if (L.rows() != matD.rows() || L.cols() != matD.cols()) {
           L.resize(matD.rows(), matD.cols());
       }
-      L.setZero();
-      gpu_chol(matD, L);
+      chol_->compute_cholesky(matD);
+  }
+
+  void store() {
+      chol_->download(L);
       L.triangularView<Eigen::StrictlyUpper>().setZero();
+  }
+
+  void reload() {
+      chol_->upload(L);
   }
 };
 
-// Need to change the initialisation to remove sparse matrix
-// Also remove trace estimation
 
 class Covariance {
 public:
@@ -166,6 +183,13 @@ protected:
   dblvec3d                            re_temp_data_;
   intvec                              z_;
   int                                 Q_;
+
+public:
+
+  CovarianceLLT                       matL;
+
+protected:
+
   SparseMatrix<double>                matZ;
   MatrixXd                            matD;
   int                                 n_;
@@ -174,8 +198,7 @@ protected:
   MatrixXd                            dmat_matrix;
   VectorXd                            zquad;
   bool                                isSparse = true;
-  CovarianceLLT                       matL;
-  //SparseChol                          spchol;
+  
   
   // functions
   void                            update_parameters_in_calculators();
@@ -201,17 +224,17 @@ protected:
 inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
-  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matZ(data_.rows(),Q_), matD(Q_,Q_),
+  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matL(Q_), matZ(data_.rows(),Q_), matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
-  Z_constructor();
+    Z_constructor();
 };
 
 inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
   form_(form), data_(data), colnames_(colnames),
-  Q_(parse()),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(Q_),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   Z_constructor();
 };
@@ -221,7 +244,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(formula), data_(data), colnames_(colnames), parameters_(parameters), 
-  Q_(parse()), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -232,7 +255,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(form), data_(data), colnames_(colnames), parameters_(parameters),
-  Q_(parse()), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -244,7 +267,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXd& parameters) :
   form_(formula), data_(data), colnames_(colnames),
   parameters_(parameters.data(),parameters.data()+parameters.size()),
-  Q_(parse()), matZ(data_.rows(),Q_),matD(Q_,Q_),
+  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -256,7 +279,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const ArrayXd& parameters) :
   form_(form), data_(data), colnames_(colnames),
-  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matZ(data_.rows(),Q_),
+  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),
   matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -265,7 +288,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
 
 inline glmmr::Covariance::Covariance(const glmmr::Covariance& cov) : form_(cov.form_), data_(cov.data_),
 colnames_(cov.colnames_),
-parameters_(cov.parameters_), Q_(parse()), matZ(data_.rows(),Q_),matD(Q_,Q_),
+parameters_(cov.parameters_), Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_),
 dmat_matrix(max_block_dim(),max_block_dim()),
 zquad(max_block_dim()) {
   make_sparse();
@@ -539,6 +562,7 @@ inline int glmmr::Covariance::parse(){
   for(int i = 0; i < calc_.size(); i++) re_count_[re_order_[i]] += re_temp_data_[i].size();
   B_ = calc_.size();
   n_ = data_.rows();
+  
   return Qn;
 }
 
@@ -866,16 +890,24 @@ inline SparseMatrix<double> glmmr::Covariance::Z_sparse() {
 }
 
 inline MatrixXd glmmr::Covariance::ZL() {
-    MatrixXd Z(matZ);
-    return matL.productR(Z);
+    MatrixXd L = matL.matrixL();
+    if (matZ.rows() == matZ.cols()) {
+        return L;
+    }
+    else {
+        return matZ * L;
+    }
 }
 
 inline MatrixXd glmmr::Covariance::ZLu(const MatrixXd& u){
-  MatrixXd Z(matZ);
-  MatrixXd ZL = matL.productR(Z);
-  MatrixXd ZLu(ZL.rows(), u.cols());
-  gpu_multiply(ZL, u, ZLu);
-  return ZLu;
+    MatrixXd LU(Q_, u.cols());
+    matL.productL(u, LU);
+    if (matZ.rows() == matZ.cols()) {
+        return LU;
+    }
+    else {
+        return matZ * LU;
+    }
 }
 
 inline MatrixXd glmmr::Covariance::Lu(const MatrixXd& u){

@@ -164,7 +164,7 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter)
     optim.template ml_beta<BOBYQA>();
     VectorXd beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
     VectorXd theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
-    std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
+    std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose() << std::endl;
     while (!converged && iter <= max_iter) {
         matrix.posterior_u_samples(niter);
         optim.nr_beta();
@@ -172,9 +172,9 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter)
         beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
         theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
         ll = optim.current_likelihood_values();
-        std::cout << "\nITER: " << iter << " ------------";
+        std::cout << "\n-------------- ITER: " << iter << " ------------" << std::endl;
         std::cout << "\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
-        std::cout << "\nu: " << re.u_.topLeftCorner(5,5);
+        std::cout << "\nu: " << re.u_.topRows(5).rowwise().mean().transpose();
         std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second;
         if (iter > 1) {
             lldiff = optim.u_diagnostic();

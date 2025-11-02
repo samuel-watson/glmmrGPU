@@ -2,16 +2,31 @@
 
 #include <Eigen/Dense>
 
-void gpu_chol_solve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+class GPUCholeskyManager {
+public:
+    double* d_A = nullptr;
+    int* d_info = nullptr;
+    void* cusolver_handle;
+    void* cublas_handle;
+    int n;
+    size_t matrix_size;
+    bool is_allocated = false;
 
-void gpu_inverse_solve_in_place(const Eigen::MatrixXd& A, Eigen::MatrixXd& B);
+    GPUCholeskyManager(const GPUCholeskyManager&) = delete;
+    GPUCholeskyManager& operator=(const GPUCholeskyManager&) = delete;
+    GPUCholeskyManager(int dim);
+    ~GPUCholeskyManager();
 
-void gpu_chol(const Eigen::MatrixXd& A, Eigen::MatrixXd& X);
-
-void gpu_chol_solve_existing(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+    void upload(const Eigen::MatrixXd& A);
+    void compute_cholesky(const Eigen::MatrixXd& A);
+    void solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+    void solve(const Eigen::MatrixXd& B, Eigen::VectorXd& X);
+    void solveInPlace(Eigen::MatrixXd& B);
+    void download(Eigen::MatrixXd& X);
+    void multiplyByMatrix(const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+    void leftMultiplyByMatrix(const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+};
 
 void gpu_multiply(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
 
 void gpu_gram_matrix(const Eigen::MatrixXd& A, Eigen::MatrixXd& X);
-
-void gpu_gram_cholesky(const Eigen::MatrixXd& A, Eigen::MatrixXd& L, int m, int n);
