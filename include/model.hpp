@@ -181,8 +181,8 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
             llvartot = optim.ll_diff_variance(true, true);
             std::cout << "\nLog-likelihood differences: " << lldiff.first << " | " << lldiff.second;
             lltot = lldiff.first + lldiff.second;
-            converged = lltot + 1.96 * llvartot / sqrt((double)niter) < 0;
-            prob = 1.0 - 0.5 * erfc(-1.0 * M_SQRT1_2 * lltot / sqrt((double)niter));
+            converged = lltot + 1.96 * sqrt(llvartot) / sqrt((double)niter) < 0;
+            prob = 1.0 - 0.5 * erfc(-1.0 * M_SQRT1_2 * lltot / sqrt(llvartot / (double)niter));
             std::cout << "\nLog-likelihood variance: " << llvartot << " | Probability: " << prob*100 << "%" << std::endl;
             if (converged) std::cout << "\nCONVERGED!";
         }
