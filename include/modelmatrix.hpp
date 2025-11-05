@@ -1103,8 +1103,10 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
 template<typename modeltype>
 inline VectorXd glmmr::ModelMatrix<modeltype>::log_gradient(const VectorXd &v,
                                                             bool betapars){
+    MatrixXd vm(v.size(), 1);
+    vm.col(0) = v;
   ArrayXd size_n_array(model.n());
-  gradient_eta(v,size_n_array);
+  size_n_array = (gradient_eta(vm, size_n_array)).col(0).array();
   ArrayXd size_q_array = ArrayXd::Zero(Q());
   ArrayXd size_p_array = ArrayXd::Zero(P());
   SparseMatrix<double> ZLt = model.covariance.ZL_sparse();

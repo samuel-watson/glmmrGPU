@@ -998,7 +998,7 @@ inline void glmmr::Covariance::make_sparse(){
       compact_col++;
     }
     dim = block_dim(b);
-#pragma omp parallel for collapse(2) schedule(dynamic)
+#pragma omp parallel for schedule(dynamic)
     for(int i = 0; i < dim; i++){
       for(int j = 0; j < (i+1); j++){
         val = get_val(b,i,j);
@@ -1195,10 +1195,10 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
       par_index.push_back(par_pos_int);
     }
     
-#pragma omp parallel for collapse(2) schedule(dynamic)
+#pragma omp parallel for schedule(dynamic)
     for(int i = 0; i < block_dimension; i++){
-      for(int j = i; j < block_dimension; j++){
-          dblvec out(matrix_n);
+        dblvec out(matrix_n);
+      for(int j = i; j < block_dimension; j++){          
         if(order == 1){
           out = calc_[b].calculate<CalcDyDx::BetaFirst>(i,j,0,0);
         } else {
