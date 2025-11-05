@@ -5,11 +5,14 @@
 class GPUCholeskyManager {
 public:
     double* d_A = nullptr;
+    double* d_B = nullptr;
+    double* d_work = nullptr;
     int* d_info = nullptr;
     void* cusolver_handle;
     void* cublas_handle;
     int n;
     size_t matrix_size;
+    int workspace_size;
     bool is_allocated = false;
 
     GPUCholeskyManager(const GPUCholeskyManager&) = delete;

@@ -730,11 +730,18 @@ inline dblvec glmmr::ModelOptim<modeltype>::get_upper_values(bool beta, bool the
 
 template<typename modeltype>
 inline void glmmr::ModelOptim<modeltype>::nr_beta(){
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
   if(re.u_.cols() != ll_current.rows()) ll_current.resize(re.u_.cols(),NoChange);
   // save the old likelihood values
   previous_ll_values.first = current_ll_values.first;
   previous_ll_var.first = current_ll_var.first;
   
+  auto t1 = high_resolution_clock::now();
+
   int niter = re.u(false).cols();
   MatrixXd zd = matrix.linpred();
   ArrayXd sigmas(niter);
@@ -760,24 +767,27 @@ inline void glmmr::ModelOptim<modeltype>::nr_beta(){
   }
   
   MatrixXd XtWXm = MatrixXd::Zero(P(), P());
-  
+  MatrixXd W = glmmr::maths::dhdmu(zd, model.family);
+  W = (W.array().colwise() * nvar_par).inverse();
+  W.array().colwise() *= model.data.weights;
+  MatrixXd resid = matrix.gradient_eta(re.u_);
+
+  auto t2 = high_resolution_clock::now();
+  duration<double, std::milli> ms_double = t2 - t1;
+  std::cout << "Timing (NR beta setup): " << ms_double.count() << "ms" << std::endl;
+  //std::cout << "Resid:\n" << resid.topLeftCorner(5, 5);
+  //std::cout << "W:\n" << W.topLeftCorner(5, 5);
   #pragma omp parallel
   {
-    MatrixXd XtWXm_private = MatrixXd::Zero(P(), P());
-    VectorXd w_local(model.n());
-    ArrayXd resid_local(model.n());
+    MatrixXd XtWXm_private(P(), P());
     
   #pragma omp for nowait
     for(int i = 0; i < niter; ++i){
-      w_local = glmmr::maths::dhdmu(zd.col(i), model.family);
-      w_local = ((w_local.array() * nvar_par).inverse() * model.data.weights).matrix();
-      
-      matrix.gradient_eta(re.u_.col(i), resid_local);
-      XtWXm_private.noalias() += X.transpose() * (X.array().colwise() * w_local.array()).matrix();
+      XtWXm_private.noalias() = X.transpose() * (X.array().colwise() * W.col(i).array()).matrix();
       if(model.family.family == Fam::poisson){
-        Wu.col(i) = resid_local.matrix();
+        Wu.col(i) = resid.col(i);
       } else {
-        Wu.col(i) =  w_local.cwiseProduct(resid_local.matrix());
+        Wu.col(i) =  W.col(i).cwiseProduct(resid.col(i));
       }
     }
     
@@ -785,17 +795,26 @@ inline void glmmr::ModelOptim<modeltype>::nr_beta(){
     XtWXm += XtWXm_private;
   }
   XtWXm *= (1.0 / niter);
+
+  auto t3 = high_resolution_clock::now();
+  ms_double = t3 - t2;
+  std::cout << "Timing (XtWXm): " << ms_double.count() << "ms" << std::endl;
   
-  Eigen::LLT<MatrixXd> llt(XtWXm);
-  //MatrixXd XtWXm_inv = llt.solve(MatrixXd::Identity(P(), P()));
-  
+  Eigen::LLT<MatrixXd> llt(XtWXm);  
   VectorXd Wum = Wu.rowwise().mean();
   VectorXd bincr = llt.solve(X.transpose() * Wum);// XtWXm_inv * X.transpose() * Wum;
   update_beta(model.linear_predictor.parameter_vector() + bincr);
   
+  auto t4 = high_resolution_clock::now();
+  ms_double = t4 - t3;
+  std::cout << "Timing (XtWXm solve): " << ms_double.count() << "ms" << std::endl;
   // repopulate loglikelihood history - assumes NR can 
   // only be used with MCEM for the theta parameters - TO DO: allow NR for beta and SAEM for theta
   current_ll_values.first = log_likelihood();
+  auto t5 = high_resolution_clock::now();
+  ms_double = t5 - t4;
+  std::cout << "Timing (Recal. log-lik): " << ms_double.count() << "ms" << std::endl;
+
   current_ll_var.first = (ll_current.col(0) - ll_current.col(0).mean()).square().sum() / (ll_current.col(0).size() - 1);
 }
 
@@ -974,23 +993,12 @@ inline void glmmr::ModelOptim<modeltype>::calculate_var_par(){
       ArrayXd sigmas(niter);
       sigmas.setZero();
       MatrixXd zd = matrix.linpred();
+      MatrixXd zdu = glmmr::maths::mod_inv_func(zd, model.family.link);
 //#pragma omp parallel for if(niter > 50)
-      for(int i = 0; i < niter; ++i){
-        VectorXd zdu = glmmr::maths::mod_inv_func(zd.col(i), model.family.link);
-        ArrayXd resid = (model.data.y - zdu);
+      for(int i = 0; i < niter; ++i){        
+        ArrayXd resid = (model.data.y - zdu.col(i));
         resid *= model.data.weights.sqrt();
-        if(model.family.family==Fam::gaussian){
-          sigmas(i) = (resid - resid.mean()).square().sum()/(resid.size()-1.0);
-        } else {
-          for(int j = 0; j < resid.size(); j++){
-            if(resid(j) < 0){
-              sigmas(i) += resid(j)*(model.family.quantile - 1.0);
-            } else {
-              sigmas(i) += resid(j)*model.family.quantile;
-            }
-          }
-          sigmas(i) *= 1.0/resid.size();
-        }
+        sigmas(i) = (resid - resid.mean()).square().sum() / (resid.size() - 1.0);        
       }
       update_var_par(sigmas.mean());
     }

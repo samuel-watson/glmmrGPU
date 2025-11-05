@@ -66,11 +66,20 @@ inline Eigen::VectorXd gaussian_cdf_vec(const Eigen::VectorXd& v) {
   return res;
 }
 
-template <typename T>
-inline T gaussian_pdf(T x)
+inline Eigen::MatrixXd gaussian_cdf_vec(const Eigen::MatrixXd& v) {
+    Eigen::MatrixXd res(v.rows(), v.cols());
+    for (int i = 0; i < v.rows(); ++i) {
+        for (int j = 0; j < v.cols(); j++) {
+            res(i,j) = gaussian_cdf(v(i));
+        }
+    }
+    return res;
+}
+
+inline double gaussian_pdf(double x)
 {
-  static const T inv_sqrt_2pi = 0.3989422804014327;
-  return inv_sqrt_2pi * std::exp(-T(0.5) * x * x);
+  static const double inv_sqrt_2pi = 0.3989422804014327;
+  return inv_sqrt_2pi * std::exp(-0.5 * x * x);
 }
 
 inline Eigen::VectorXd gaussian_pdf_vec(const Eigen::VectorXd& v)
@@ -81,19 +90,31 @@ inline Eigen::VectorXd gaussian_pdf_vec(const Eigen::VectorXd& v)
   return res;
 }
 
-inline VectorXd mod_inv_func(const VectorXd& muin,
+inline Eigen::MatrixXd gaussian_pdf_vec(const Eigen::MatrixXd& v)
+{
+    Eigen::MatrixXd res(v.rows(), v.cols());
+    for (int i = 0; i < v.rows(); ++i) {
+        for (int j = 0; j < v.cols(); j++) {
+            res(i, j) = gaussian_pdf(v(i));
+        }
+    }
+    return res;
+}
+
+inline Eigen::MatrixXd mod_inv_func(const Eigen::MatrixXd& muin,
                                     Link link)
 {
-  VectorXd mu(muin);
+    Eigen::MatrixXd mu(muin);
   switch (link) {
   case Link::logit:
-    mu = (mu.array().exp() / (1 + mu.array().exp())).matrix();
+    mu = (mu.array().exp() / (1.0 + mu.array().exp())).matrix();
     break;
   case Link::loglink:
     mu = mu.array().exp().matrix();
     break;
   case Link::probit:
-    mu = gaussian_cdf_vec(mu);
+      mu.unaryExpr(&gaussian_cdf);
+    //mu = gaussian_cdf_vec(mu);
     break;
   case Link::identity:
     break;
@@ -102,6 +123,30 @@ inline VectorXd mod_inv_func(const VectorXd& muin,
     break;
   }
   return mu;
+}
+
+inline Eigen::VectorXd mod_inv_func(const Eigen::VectorXd& muin,
+    Link link)
+{
+    Eigen::VectorXd mu(muin);
+    switch (link) {
+    case Link::logit:
+        mu = (mu.array().exp() / (1 + mu.array().exp())).matrix();
+        break;
+    case Link::loglink:
+        mu = mu.array().exp().matrix();
+        break;
+    case Link::probit:
+        mu.unaryExpr(&gaussian_cdf);
+        //mu = gaussian_cdf_vec(mu);
+        break;
+    case Link::identity:
+        break;
+    case Link::inverse:
+        mu = mu.array().inverse().matrix();
+        break;
+    }
+    return mu;
 }
 
 inline double mod_inv_func(const double& muin,
@@ -128,11 +173,10 @@ inline double mod_inv_func(const double& muin,
 }
 
 
-
-inline Eigen::VectorXd dhdmu(const Eigen::VectorXd& xb,
+inline Eigen::MatrixXd dhdmu(const Eigen::MatrixXd& xb,
                              const glmmr::Family& family) {
-  Eigen::VectorXd wdiag(xb.size());
-  Eigen::ArrayXd p(xb.size());
+    Eigen::MatrixXd wdiag(xb.rows(), xb.cols());
+    Eigen::MatrixXd p(xb.rows(), xb.cols());
   
   switch(family.family){
     case Fam::poisson:
@@ -152,22 +196,23 @@ inline Eigen::VectorXd dhdmu(const Eigen::VectorXd& xb,
         switch(family.link){
           case Link::loglink:
             p = mod_inv_func(xb, family.link);
-            wdiag = ((1.0 - p) * p.inverse()).matrix();
+            wdiag = ((1.0 - p.array()) * p.array().inverse()).matrix();
             break;
           case Link::identity:
             p = mod_inv_func(xb, family.link);
-            wdiag = (p * (1 - p)).matrix();
+            wdiag = (p.array() * (1 - p.array())).matrix();
             break;
           case Link::probit:
           {
             p = mod_inv_func(xb, family.link);
-            Eigen::ArrayXd pinv = gaussian_pdf_vec(xb);
-            wdiag = ((p * (1.0 - p)) * pinv.inverse()).matrix();
+            Eigen::MatrixXd pinv(xb);
+            pinv.unaryExpr(&gaussian_pdf);
+            wdiag = ((p.array() * (1.0 - p.array())) * pinv.array().inverse()).matrix();
             break;
           }
           default:
             p = mod_inv_func(xb, family.link);
-            wdiag = (p * (1.0 - p)).inverse().matrix();
+            wdiag = (p.array() * (1.0 - p.array())).inverse().matrix();
             break;
         }
       break;
@@ -205,42 +250,105 @@ inline Eigen::VectorXd dhdmu(const Eigen::VectorXd& xb,
       {
         //only logit currently
         p = mod_inv_func(xb, family.link);
-        wdiag = (p * (1.0 - p)).inverse().matrix();
+        wdiag = (p.array() * (1.0 - p.array())).inverse().matrix();
         break;
       }
     case Fam::quantile: case Fam::quantile_scaled:
     {
-      switch(family.link){
-        case Link::loglink:
-          p = mod_inv_func(xb, family.link);
-          p = p.square().inverse();
-          break;
-        case Link::identity:
-          wdiag.setConstant(1.0);
-          break;
-        case Link::probit:
-        {
-          p = gaussian_pdf_vec(xb);
-          p = p.inverse();
-          break;
-        }
-        case Link::inverse:
-        {
-          p = xb.array().square().inverse();
-          break;
-        }
-        case Link::logit:
-          p = mod_inv_func(xb, family.link);
-          p = p*(1-p);
-          p = p.square().inverse();
-          break;
-        }
-      
-      // p *= (family.quantile * family.quantile)/(1 + pow(family.quantile,4));
+        throw std::runtime_error("Quantile disabled");
       break;
     }
   }
   return wdiag;
+}
+
+inline Eigen::VectorXd dhdmu(const Eigen::VectorXd& xb,
+    const glmmr::Family& family) {
+    Eigen::VectorXd wdiag(xb.size());
+    Eigen::VectorXd p(xb.size());
+
+    switch (family.family) {
+    case Fam::poisson:
+    {
+        switch (family.link) {
+        case Link::identity:
+            wdiag = xb.array().exp().matrix();
+            break;
+        default:
+            wdiag = xb.array().exp().inverse().matrix();
+            break;
+        }
+        break;
+    }
+    case Fam::bernoulli: case Fam::binomial:
+    {
+        switch (family.link) {
+        case Link::loglink:
+            p = mod_inv_func(xb, family.link);
+            wdiag = ((1.0 - p.array()) * p.array().inverse()).matrix();
+            break;
+        case Link::identity:
+            p = mod_inv_func(xb, family.link);
+            wdiag = (p.array() * (1 - p.array())).matrix();
+            break;
+        case Link::probit:
+        {
+            p = mod_inv_func(xb, family.link);
+            VectorXd pinv(xb);
+            pinv.unaryExpr(&gaussian_pdf);
+            wdiag = ((p.array() * (1.0 - p.array())) * pinv.array().inverse()).matrix();
+            break;
+        }
+        default:
+            p = mod_inv_func(xb, family.link);
+            wdiag = (p.array() * (1.0 - p.array())).inverse().matrix();
+            break;
+        }
+        break;
+    }
+    case Fam::gaussian:
+    {
+        switch (family.link) {
+        case Link::loglink:
+            wdiag = xb.array().exp().inverse().matrix();
+            break;
+        default:
+            //identity
+            wdiag.setConstant(1.0);
+            break;
+        }
+        break;
+    }
+    case Fam::gamma:
+    {
+        switch (family.link) {
+        case Link::inverse:
+            wdiag = xb.array().square().inverse().matrix();
+            break;
+        case Link::identity:
+            wdiag = xb.array().square().matrix();
+            break;
+        default:
+            //log
+            wdiag.setConstant(1.0);
+            break;
+        }
+        break;
+    }
+    case Fam::beta:
+    {
+        //only logit currently
+        p = mod_inv_func(xb, family.link);
+        wdiag = (p.array() * (1.0 - p.array())).inverse().matrix();
+        break;
+    }
+    case Fam::quantile: case Fam::quantile_scaled:
+    {
+        throw std::runtime_error("Quantile disabled");
+        break;
+    }
+    }
+    return wdiag;
 }
 
 inline Eigen::VectorXd detadmu(const Eigen::VectorXd& xb,
@@ -658,8 +766,7 @@ inline double log_likelihood(const Eigen::ArrayXd y,
   }
   case Fam::quantile: case Fam::quantile_scaled:
   {
-    Eigen::ArrayXd resid = y - (mod_inv_func(mu,family.link)).array();
-    for(int i = 0; i < mu.size(); i++)logl += resid(i) <= 0 ? resid(i)*(1.0 - family.quantile) : -1.0*resid(i)*family.quantile;
+      throw std::runtime_error("Quantile disabled");
     break;
   }
   }

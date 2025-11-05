@@ -41,35 +41,36 @@ inline bool any_match(T t, Vals ...vals)
 
 class CovarianceLLT {
 public:
-    std::unique_ptr<GPUCholeskyManager> chol_;
+    //std::unique_ptr<GPUCholeskyManager> chol_;
+    GPUCholeskyManager chol_;
     MatrixXd L;
     const int Q;
   
-  CovarianceLLT(const int Q_) : Q(Q_), L(Q_,Q_) {
-      chol_ = std::make_unique<GPUCholeskyManager>(Q);
+  CovarianceLLT(const int Q_) : Q(Q_), L(Q_,Q_), chol_(Q_) {
+      //chol_ = std::make_unique<GPUCholeskyManager>(Q);
   }
   
   VectorXd solve(const VectorXd& x) {
       MatrixXd X(L.rows(), 1);
       //X.col(0) = x;
-     chol_->solve(x, X);
+     chol_.solve(x, X);
      return X.col(0);
   }
   
   MatrixXd solve(const MatrixXd& x) {
       MatrixXd sol(L.rows(), x.cols());
       //sol = x;
-      chol_->solve(x, sol);
+      chol_.solve(x, sol);
       return sol;
   }
 
   void solveInPlace(MatrixXd& x) {
-      chol_->solveInPlace(x);
+      chol_.solveInPlace(x);
   }
 
   void solve(const MatrixXd& x, MatrixXd& sol) {
       //sol = x;
-      chol_->solve(x, sol);
+      chol_.solve(x, sol);
   }
   
   MatrixXd matrixL() {
@@ -79,38 +80,38 @@ public:
   
   MatrixXd productR(const MatrixXd& Z) {
       MatrixXd prod(Z.rows(), L.cols());
-      chol_->leftMultiplyByMatrix(Z, prod);
+      chol_.leftMultiplyByMatrix(Z, prod);
       return prod;
   }
   
   MatrixXd productL(const MatrixXd& Z) {
       MatrixXd prod(L.rows(), Z.cols());
-      chol_->multiplyByMatrix(Z, prod);
+      chol_.multiplyByMatrix(Z, prod);
       return prod;
   }
 
   void productR(const MatrixXd& Z, MatrixXd& prod) {
-      chol_->leftMultiplyByMatrix(Z, prod);
+      chol_.leftMultiplyByMatrix(Z, prod);
   }
 
   void productL(const MatrixXd& Z, MatrixXd& prod) {
-      chol_->multiplyByMatrix(Z, prod);
+      chol_.multiplyByMatrix(Z, prod);
   }
   
   void compute(const MatrixXd& matD){
       if (L.rows() != matD.rows() || L.cols() != matD.cols()) {
           L.resize(matD.rows(), matD.cols());
       }
-      chol_->compute_cholesky(matD);
+      chol_.compute_cholesky(matD);
   }
 
   void store() {
-      chol_->download(L);
+      chol_.download(L);
       L.triangularView<Eigen::StrictlyUpper>().setZero();
   }
 
   void reload() {
-      chol_->upload(L);
+      chol_.upload(L);
   }
 };
 
@@ -997,6 +998,7 @@ inline void glmmr::Covariance::make_sparse(){
       compact_col++;
     }
     dim = block_dim(b);
+#pragma omp parallel for collapse(2) schedule(dynamic)
     for(int i = 0; i < dim; i++){
       for(int j = 0; j < (i+1); j++){
         val = get_val(b,i,j);
@@ -1088,10 +1090,20 @@ inline bool glmmr::Covariance::any_log_re() const{
 
 
 inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+
   static const double LOG_2PI = log(2*M_PI);
   static const double NEG_HALF_LOG_2PI = -0.5 * LOG_2PI;
+  auto t1 = high_resolution_clock::now();
   std::vector<MatrixXd> derivs;
   derivatives(derivs, 1);
+  auto t2 = high_resolution_clock::now();
+  duration<double, std::milli> ms_double = t2 - t1;
+  std::cout << "Timing (calculate derivatives): " << ms_double.count() << "ms" << std::endl;
+
   const int npars = derivs.size() - 1;
   const int niter = umat.cols();
   VectorXd grad(npars);
@@ -1112,6 +1124,11 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
       matL.solve(derivs[i + 1], S[i]);
       grad(i) = -0.5 * S[i].trace();
   }
+
+  auto t3 = high_resolution_clock::now();
+  ms_double = t3 - t2;
+  std::cout << "Timing (deriv-inverse trace): " << ms_double.count() << "ms" << std::endl;
+
   //dblvec dqf_local(npars, 0.0);
   dblvec v_buffer_local(Q_);
   MatrixXd vmat(umat.rows(), umat.cols());
@@ -1134,21 +1151,14 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
 #pragma omp critical
       dqf_global += dqf_thread;
   }
-  /*
-  for (int i = 0; i < niter; i++)
-  {
-      //VectorXd ucol = umat.col(i);
-      VectorXd v = vmat.col(i);//matL.solve(ucol);
-      double qf = v.dot(umat.col(i));
-      logl(i) += -0.5 * qf;
-      for (int j = 0; j < npars; j++) dqf_local[j] += umat.col(i).dot(S[j] * v);
-  }*/
 
-  for (int j = 0; j < npars; j++) dqf[j] += dqf_global(j);// dqf_local[j];
-  // Accumulate gradient contributions
+  auto t4 = high_resolution_clock::now();
+  ms_double = t4 - t3;
+  std::cout << "Timing (nr quad form): " << ms_double.count() << "ms" << std::endl;
+
+  for (int j = 0; j < npars; j++) dqf[j] += dqf_global(j);
   const double niter_inv = 1.0 / (double)niter;
   for (int j = 0; j < npars; j++) grad(j) += 0.5 * dqf[j] * niter_inv;
-  // Compute Hessian approximation
   MatrixXd M(npars, npars);
   for (int j = 0; j < npars; j++) {
       for (int k = j; k < npars; k++) {
@@ -1157,6 +1167,9 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
           if (j != k) M(k, j) = 0.5 * val;
       }
   }
+  auto t5 = high_resolution_clock::now();
+  ms_double = t5 - t4;
+  std::cout << "Timing (Hessian): " << ms_double.count() << "ms" << std::endl;
   VectorXd theta_curr = Map<VectorXd>(parameters_.data(), parameters_.size());
   theta_curr += M.llt().solve(grad);
   update_parameters(theta_curr.array());
@@ -1181,16 +1194,11 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
       int par_pos_int = par_pos - pars.begin();
       par_index.push_back(par_pos_int);
     }
-#if defined(R_BUILD) && defined(ENABLE_DEBUG)
-    Rcpp::Rcout << "\nSIGMA DERIVATIVES\nBlock " << b << " with " << R_block << " parameters, " << block_dimension << " size";
-    Rcpp::Rcout << "\nPar indexes: ";
-    for(const auto& i: par_index)Rcpp::Rcout << i << " ";
-#endif
-    //added conditional parallelisation for large blocks
-    dblvec out(matrix_n);
-//#pragma omp parallel for if(block_dimension > 50) private(out)
+    
+#pragma omp parallel for collapse(2) schedule(dynamic)
     for(int i = 0; i < block_dimension; i++){
       for(int j = i; j < block_dimension; j++){
+          dblvec out(matrix_n);
         if(order == 1){
           out = calc_[b].calculate<CalcDyDx::BetaFirst>(i,j,0,0);
         } else {

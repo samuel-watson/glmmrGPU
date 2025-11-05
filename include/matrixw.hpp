@@ -27,7 +27,7 @@ template<typename modeltype>
 inline void glmmr::MatrixW<modeltype>::update(){
   if(W_.size() != model.n())W_.conservativeResize(model.n());
   ArrayXd nvar_par(model.n());
-  ArrayXd xb(model.n());
+  VectorXd xb(model.n());
   switch(model.family.family){
   case Fam::gaussian: 
     nvar_par = model.data.variance;
@@ -54,11 +54,11 @@ inline void glmmr::MatrixW<modeltype>::update(){
   }
   
   if(attenuated){
-    xb = glmmr::maths::attenuted_xb(model.xb(),model.covariance.Z(),model.covariance.D(),model.family.link);
+      xb = (glmmr::maths::attenuted_xb(model.xb(), model.covariance.Z(), model.covariance.D(), model.family.link)).matrix();
   } else {
-    xb = model.xb();
+    xb = model.xb().matrix();
   }
-  W_ = glmmr::maths::dhdmu(xb,model.family);
+  W_ = (glmmr::maths::dhdmu(xb, model.family)).array();
   W_ = (W_.array()*nvar_par).matrix();
   W_ = ((W_.array().inverse()) * model.data.weights).matrix();
 }
