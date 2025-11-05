@@ -152,7 +152,7 @@ void GPUCholeskyManager::compute_cholesky(const Eigen::MatrixXd& A) {
         cudaFree(d_work);
         throw std::runtime_error("Info allocation failed");
     }
-
+    /*
     // Synchronize before calling Cholesky
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
@@ -160,8 +160,12 @@ void GPUCholeskyManager::compute_cholesky(const Eigen::MatrixXd& A) {
         cudaFree(d_work);
         cudaFree(d_info);
         throw std::runtime_error("Error before Cholesky");
-    }
-
+    }*/
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    auto t1 = high_resolution_clock::now();
     // Compute Cholesky decomposition - DOUBLE precision
     status = cusolverDnDpotrf(  // D for double!
         handle,
@@ -173,21 +177,15 @@ void GPUCholeskyManager::compute_cholesky(const Eigen::MatrixXd& A) {
         lwork,    // Workspace size
         d_info    // Info output
     );
+    auto t2 = high_resolution_clock::now();
+    duration<double, std::milli> ms_double = t2 - t1;
+    std::cout << "Timing (cusolverDnDpotrf): " << ms_double.count() << "ms" << std::endl;
 
     if (status != CUSOLVER_STATUS_SUCCESS) {
         std::cerr << "cusolverDnDpotrf failed with status: " << status << std::endl;
         cudaFree(d_work);
         cudaFree(d_info);
         throw std::runtime_error("Cholesky decomposition failed");
-    }
-
-    // Synchronize after Cholesky to catch errors
-    err = cudaDeviceSynchronize();
-    if (err != cudaSuccess) {
-        std::cerr << "ERROR DURING Cholesky execution: " << cudaGetErrorString(err) << std::endl;
-        cudaFree(d_work);
-        cudaFree(d_info);
-        throw std::runtime_error("Cholesky execution caused memory error");
     }
 
     // Check for errors
@@ -229,6 +227,11 @@ void GPUCholeskyManager::solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X)
     CUDA_CHECK(cudaMalloc(&d_info, sizeof(int)));
     CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double), cudaMemcpyHostToDevice));
     // Solve AX = B for all right-hand sides simultaneously
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    auto t1 = high_resolution_clock::now();
     CUSOLVER_CHECK(cusolverDnDpotrs(
         h,
         CUBLAS_FILL_MODE_LOWER,
@@ -240,6 +243,9 @@ void GPUCholeskyManager::solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X)
         n,        // Leading dimension of B (number of rows)
         d_info
     ));
+    auto t2 = high_resolution_clock::now();
+    duration<double, std::milli> ms_double = t2 - t1;
+    std::cout << "Timing (cusolverDnDpotrs): " << ms_double.count() << "ms" << std::endl;
 
     int info_h = 0;
     CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
@@ -365,13 +371,14 @@ void GPUCholeskyManager::download(Eigen::MatrixXd& X) {
         throw std::runtime_error("Size mismatch");
     }
 
+    /*
     // Synchronize before copy
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         std::cerr << "ERROR: cudaDeviceSynchronize failed: "
             << cudaGetErrorString(err) << std::endl;
         throw std::runtime_error("Synchronization failed");
-    }
+    }*/
 
     // Perform the copy
     err = cudaMemcpy(X.data(), d_A, matrix_size, cudaMemcpyDeviceToHost);
@@ -436,12 +443,12 @@ void GPUCholeskyManager::multiplyByMatrix(const Eigen::MatrixXd& B, Eigen::Matri
         std::cerr << "cublasDtrmm failed with status: " << status << std::endl;
         throw std::runtime_error("cublasDtrmm failed");
     }
-
+    /*
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         std::cerr << "ERROR after multiply: " << cudaGetErrorString(err) << std::endl;
         throw std::runtime_error("Multiplication caused memory error");
-    }
+    }*/
 
     CUDA_CHECK(cudaMemcpy(X.data(), d_result, n * other_cols * sizeof(double), cudaMemcpyDeviceToHost));
 
@@ -497,12 +504,12 @@ void GPUCholeskyManager::leftMultiplyByMatrix(const Eigen::MatrixXd& B, Eigen::M
         std::cerr << "cublasDtrmm failed with status: " << status << std::endl;
         throw std::runtime_error("cublasDtrmm failed");
     }
-
+    /*
     err = cudaDeviceSynchronize();
     if (err != cudaSuccess) {
         std::cerr << "ERROR after multiply: " << cudaGetErrorString(err) << std::endl;
         throw std::runtime_error("Multiplication caused memory error");
-    }
+    }*/
 
     CUDA_CHECK(cudaMemcpy(X.data(), d_result, n * other_cols * sizeof(double), cudaMemcpyDeviceToHost));
 

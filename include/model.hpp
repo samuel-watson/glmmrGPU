@@ -156,6 +156,12 @@ inline void glmmr::Model<modeltype>::set_trace(int trace_){
 template<typename modeltype>
 inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, const bool start_ml_beta)
 {
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    
+
     bool converged = false;    
     int iter = 1;
     dblpair ll, lldiff;
@@ -166,9 +172,19 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
     VectorXd theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
     std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose() << std::endl;
     while (!converged && iter <= max_iter) {
+        auto t1 = high_resolution_clock::now();
         matrix.posterior_u_samples(niter);
+        auto t2 = high_resolution_clock::now();
+        duration<double, std::milli> ms_double = t2 - t1;
+        std::cout << "Timing (posterior u sample): " << ms_double.count() << "ms" << std::endl;
         optim.nr_beta();
+        auto t3 = high_resolution_clock::now();
+        ms_double = t3 - t2;
+        std::cout << "Timing (nr beta): " << ms_double.count() << "ms" << std::endl;
         optim.nr_theta();
+        auto t4 = high_resolution_clock::now();
+        ms_double = t4 - t3;
+        std::cout << "Timing (nr theta): " << ms_double.count() << "ms" << std::endl;
         beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
         theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
         ll = optim.current_likelihood_values();

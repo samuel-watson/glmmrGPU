@@ -1112,17 +1112,39 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
       matL.solve(derivs[i + 1], S[i]);
       grad(i) = -0.5 * S[i].trace();
   }
-  dblvec dqf_local(npars, 0.0);
+  //dblvec dqf_local(npars, 0.0);
   dblvec v_buffer_local(Q_);
+  MatrixXd vmat(umat.rows(), umat.cols());
+  matL.solve(umat, vmat);
+
+  VectorXd dqf_global = VectorXd::Zero(npars);
+#pragma omp parallel
+  {
+      VectorXd dqf_thread = VectorXd::Zero(npars);
+
+#pragma omp for
+      for (int i = 0; i < niter; i++)
+      {
+          double qf = vmat.col(i).dot(umat.col(i));
+          logl(i) += -0.5 * qf;
+          for (int j = 0; j < npars; j++)
+              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i));
+      }
+
+#pragma omp critical
+      dqf_global += dqf_thread;
+  }
+  /*
   for (int i = 0; i < niter; i++)
   {
-      VectorXd ucol = umat.col(i);
-      VectorXd v = matL.solve(ucol);
-      double qf = v.dot(ucol);
+      //VectorXd ucol = umat.col(i);
+      VectorXd v = vmat.col(i);//matL.solve(ucol);
+      double qf = v.dot(umat.col(i));
       logl(i) += -0.5 * qf;
-      for (int j = 0; j < npars; j++) dqf_local[j] += ucol.dot(S[j] * v);
-  }
-  for (int j = 0; j < npars; j++) dqf[j] += dqf_local[j];
+      for (int j = 0; j < npars; j++) dqf_local[j] += umat.col(i).dot(S[j] * v);
+  }*/
+
+  for (int j = 0; j < npars; j++) dqf[j] += dqf_global(j);// dqf_local[j];
   // Accumulate gradient contributions
   const double niter_inv = 1.0 / (double)niter;
   for (int j = 0; j < npars; j++) grad(j) += 0.5 * dqf[j] * niter_inv;

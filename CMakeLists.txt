@@ -137,6 +137,8 @@ else()
     message(STATUS "✓ Found Eigen/Dense at: ${EIGEN_DIR}")
 endif()
 
+find_package(OpenMP)
+
 # Create library (reusable)
 add_library(cuda_cholesky_lib
     src/cuda_cholesky.cu
@@ -172,6 +174,10 @@ target_link_libraries(glmmrGPU PRIVATE
     cuda_cholesky_lib
     CUDA::cudart_static
 )
+
+if(OpenMP_CXX_FOUND)
+    target_link_libraries(glmmrGPU PUBLIC OpenMP::OpenMP_CXX)
+endif()
 
 get_target_property(SOURCES glmmrGPU SOURCES)
 message(STATUS "Target sources:")

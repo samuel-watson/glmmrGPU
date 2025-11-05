@@ -196,6 +196,7 @@ int main() {
     
 
     if (predict) {
+        std::cout << "\nGenerating predictions." << std::endl;
         int nrowpredict = std::stoi(config["nrowspred"]);
         ArrayXXd pred_data = (readMatrixFromCSV("Xp.csv", nrowpredict, ncols)).array();
         ArrayXXd offset_new(nrowpredict, 1);
@@ -220,12 +221,14 @@ int main() {
     MatrixXd Mt(theta.size(), theta.size());
     int se = std::stoi(config["se"]);
     if (se) {
+        
         M = model.matrix.information_matrix();
         Mt = model.matrix.template information_matrix_theta<glmmr::IM::EIM>();
         M = M.llt().solve(MatrixXd::Identity(M.rows(), M.cols()));
         Mt = Mt.llt().solve(MatrixXd::Identity(Mt.rows(), Mt.cols()));
     }
     else {
+        std::cout << "\nStandard errors not calculated." << std::endl;
         M.setZero();
         Mt.setZero();
     }
