@@ -775,15 +775,14 @@ inline void glmmr::ModelOptim<modeltype>::nr_beta(){
   auto t2 = high_resolution_clock::now();
   duration<double, std::milli> ms_double = t2 - t1;
   std::cout << "Timing (NR beta setup): " << ms_double.count() << "ms" << std::endl;
-  //std::cout << "Resid:\n" << resid.topLeftCorner(5, 5);
-  //std::cout << "W:\n" << W.topLeftCorner(5, 5);
+
   #pragma omp parallel
   {
-    MatrixXd XtWXm_private(P(), P());
+    MatrixXd XtWXm_private = MatrixXd::Zero(P(), P());
     
   #pragma omp for nowait
     for(int i = 0; i < niter; ++i){
-      XtWXm_private.noalias() = X.transpose() * (X.array().colwise() * W.col(i).array()).matrix();
+      XtWXm_private.noalias() += X.transpose() * (X.array().colwise() * W.col(i).array()).matrix();
       if(model.family.family == Fam::poisson){
         Wu.col(i) = resid.col(i);
       } else {

@@ -191,7 +191,7 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
         std::cout << "\n-------------- ITER: " << iter << " ------------" << std::endl;
         std::cout << "\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
         std::cout << "\nu: " << re.u_.topRows(5).rowwise().mean().transpose();
-        std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second;
+        std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second << std::endl;
         if (iter > 1) {
             lldiff = optim.u_diagnostic();
             llvartot = optim.ll_diff_variance(true, true);
