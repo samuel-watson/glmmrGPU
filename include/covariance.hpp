@@ -1194,7 +1194,12 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
       int par_pos_int = par_pos - pars.begin();
       par_index.push_back(par_pos_int);
     }
-    
+#pragma omp parallel
+    {
+#pragma omp single
+        std::cout << "OpenMP using " << omp_get_num_threads() << " threads" << std::endl;
+    }
+
 #pragma omp parallel for schedule(guided)
     for (int idx = 1; idx <= block_dimension * (block_dimension + 1) / 2; idx++) {
         dblvec out(matrix_n);
