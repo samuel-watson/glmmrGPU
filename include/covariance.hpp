@@ -1195,10 +1195,19 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
       par_index.push_back(par_pos_int);
     }
     
-#pragma omp parallel for schedule(dynamic)
-    for(int i = 0; i < block_dimension; i++){
+#pragma omp parallel for schedule(guided)
+    for (int idx = 1; idx <= block_dimension * (block_dimension + 1) / 2; idx++) {
         dblvec out(matrix_n);
-      for(int j = i; j < block_dimension; j++){          
+        double p = (sqrt(8.0 * idx + 1) - 1) / 2;
+        int i = (int)p;
+        int j;
+        if (i == p) {
+            i--;
+            j = i;
+        }
+        else {
+            j = idx - i * (i + 1) / 2 - 1;            
+        }
         if(order == 1){
           out = calc_[b].calculate<CalcDyDx::BetaFirst>(i,j,0,0);
         } else {
@@ -1220,7 +1229,7 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
             }
           }
         }
-      }
+      
     }
     block_count += block_dimension;
   }
