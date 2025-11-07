@@ -3,7 +3,6 @@
 #include "modelbits.hpp"
 #include "randomeffects.hpp"
 #include "modelmatrix.hpp"
-#include "openmpheader.h"
 #include "calculator.hpp"
 #include "optim/optim.h"
 
