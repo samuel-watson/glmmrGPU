@@ -156,6 +156,11 @@ target_link_libraries(cuda_cholesky_lib PUBLIC
     CUDA::cublas
 )
 
+if(OpenMP_CXX_FOUND)
+    message(STATUS "Linking OpenMP")
+    target_link_libraries(cuda_cholesky_lib PUBLIC OpenMP::OpenMP_CXX)
+endif()
+
 set_target_properties(cuda_cholesky_lib PROPERTIES
     CUDA_SEPARABLE_COMPILATION ON
     POSITION_INDEPENDENT_CODE ON
@@ -170,12 +175,15 @@ set_target_properties(glmmrGPU PROPERTIES
     CUDA_RESOLVE_DEVICE_SYMBOLS ON
 )
 
+
+
 target_link_libraries(glmmrGPU PRIVATE 
     cuda_cholesky_lib
     CUDA::cudart_static
 )
 
 if(OpenMP_CXX_FOUND)
+    message(STATUS "Linking OpenMP")
     target_link_libraries(glmmrGPU PUBLIC OpenMP::OpenMP_CXX)
 endif()
 
