@@ -115,6 +115,7 @@ private:
   MatrixXd                        sigma_block(int b, bool inverse = false);
   MatrixXd                        sigma_builder(int b, bool inverse = false);
   MatrixXd                        information_matrix_by_block(int b);
+  double                          resid(const double x);
   bool                            useBlock = true;
   bool                            useSparse = true;
 };
@@ -951,13 +952,22 @@ inline BoxResults glmmr::ModelMatrix<modeltype>::box(){
 template<typename modeltype>
 inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
   
-    ArrayXXd size_n_array(v.rows(), v.cols());
-    size_n_array.setZero();
+  ArrayXXd size_n_array(v.rows(), v.cols());
+  size_n_array.setZero();
   if(size_n_array.rows() != model.n())throw std::runtime_error("Size n array != n");
   size_n_array.colwise() += model.xb();
   SparseMatrix<double> ZL = model.covariance.ZL_sparse();
   size_n_array += (ZL * v).array();
-  
+
+#pragma omp parallel for collapse(2) schedule(dynamic)
+  for (int i = 0; i < size_n_array.rows(); i++) {
+      for (int j = 0; j < size_n_array.cols(); j++) {
+          double out = resid(size_n_array(i, j), i);
+          size_n_array(i, j) = out;
+      }
+  }
+
+  /*
   switch(model.family.family){
   case Fam::poisson:
   {
@@ -1089,15 +1099,117 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
       size_n_array(i) = exp(size_n_array(i))/(exp(size_n_array(i))+1);
       size_n_array(i) = (size_n_array(i)/(1+exp(size_n_array(i)))) * model.data.var_par * (log(model.data.y(i)) - log(1- model.data.y(i)) - boost::math::digamma(size_n_array(i)*model.data.var_par) + boost::math::digamma((1-size_n_array(i))*model.data.var_par));
     }
-    break;*/
+    break;
   }
   case Fam::quantile: case Fam::quantile_scaled: 
     {
       throw std::runtime_error("Quantile is currently disabled");
     break;
     }
-  }
+  }*/
   return size_n_array.matrix();
+}
+
+template<typename modeltype>
+inline double glmmr::ModelMatrix<modeltype>::resid(const double x, const double i) {
+    double y;
+    switch (model.family.family) {
+    case Fam::poisson:
+    {
+        switch (model.family.link) {
+        case Link::identity:
+        {
+            y = (-1.0 * model.data.y(i) / x);
+            break;
+        }
+        default:
+        {
+            y = model.data.y(i) - exp(x);
+            break;
+        }
+        }
+        break;
+    }
+    case Fam::bernoulli: case Fam::binomial:
+    {
+        switch (model.family.link) {
+        case Link::loglink:
+        {
+            double logitxb = 1.0 / (1.0 + exp(-x));
+            y = logitxb * (model.data.y(i) - model.data.variance(i)) + model.data.y(i);
+            break;
+        }
+        case Link::identity:
+        {
+            y = (model.data.y(i) / x) - (1.0 / (1.0 - x)) * (model.data.variance(i) - model.data.y(i));
+            break;
+        }
+        case Link::probit:
+        {
+            double pdf = glmmr::maths::gaussian_pdf(x);
+            double cdf = glmmr::maths::gaussian_cdf(x);
+            y = model.data.y(i) * pdf / cdf - (pdf / (1.0 - cdf)) * (model.data.variance(i) - model.data.y(i));
+            break;
+        }
+        default:
+            //logit
+        {
+            double logitxb = 1.0 / (1.0 + exp(-x));
+            y = (1.0 - logitxb) * model.data.y(i) - logitxb * (model.data.variance(i) - model.data.y(i));
+            break;
+        }
+        }
+        break;
+    }
+    case Fam::gaussian:
+    {
+        switch (model.family.link) {
+        case Link::loglink:
+        {
+            y = ( model.data.y(i) - x) * exp(x) * model.data.weights(i);
+            break;
+        }
+        default:
+        {
+            y = (model.data.y(i) - x) * model.data.weights(i) / model.data.var_par;
+            break;
+        }
+        }
+        break;
+    }
+    case Fam::gamma:
+    {
+        switch (model.family.link) {
+        case Link::inverse:
+        {
+            y = 1.0 / x - model.data.y(i);
+            break;
+        }
+        case Link::identity:
+        {
+            y = -1.0 * model.data.y(i) / x;
+            break;
+        }
+        default:
+            //log
+        {
+            y = exp(-1.0 * x) * model.data.y(i);
+            break;
+        }
+        }
+        break;
+    }
+    case Fam::beta:
+    {
+        throw std::runtime_error("Beta is currently disabled");
+    }
+    case Fam::quantile: case Fam::quantile_scaled:
+    {
+        throw std::runtime_error("Quantile is currently disabled");
+        break;
+    }
+    }
+    return y;
 }
 
 template<typename modeltype>
@@ -1182,6 +1294,11 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
                                                                const double tol, 
                                                                const bool append)
 {
+    using std::chrono::high_resolution_clock;
+    using std::chrono::duration_cast;
+    using std::chrono::duration;
+    using std::chrono::milliseconds;
+    auto t1 = high_resolution_clock::now();
   if constexpr (std::is_same_v<modeltype,bits_hsgp>){
     if(model.covariance.Q() != re.u_.rows()){
       re.u_.resize(model.covariance.Q(),1);
@@ -1189,8 +1306,7 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     }
   }
   ArrayXd xb = model.linear_predictor.xb().array() + model.data.offset.array();
-  // re.zu_ = model.covariance.ZLu(re.u_);
-  ArrayXd eta = xb; //+ re.zu_.rowwise().mean().array();
+  ArrayXd eta = xb; 
   ArrayXd ymod(eta.size());
   VectorXd W_(eta.size());
   
@@ -1229,16 +1345,15 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   MatrixXd Mb(n_cols,1);
   MatrixXd Vb(n_cols, n_cols);
   Vb.setIdentity();
-  
-  //LLT<MatrixXd> llt_Pb;
   model.covariance.matL.store();
+
+  auto t2 = high_resolution_clock::now();
+  duration<double, std::milli> ms_double = t2 - t1;
+  std::cout << "Timing (Post. U setup): " << ms_double.count() << "ms" << std::endl;
   
   if(model.family.family == Fam::gaussian) {
-    // Use colwise multiplication (faster than diagonal matrix)
-
     MatrixXd WZL = (ZL.array().colwise() * W_.array()).matrix();
-    MatrixXd Pb(WZL.cols(), WZL.cols());
-    gpu_multiply(ZL.transpose(), WZL, Pb);
+    MatrixXd Pb = ZL.transpose() * WZL;
     Pb.diagonal().array() += 1.0;
     MatrixXd yb(WZL.rows(), 1);
     yb.col(0) = WZL.transpose() * (model.data.y - xb.matrix());
@@ -1252,7 +1367,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     MatrixXd bnew(Mb);
     MatrixXd WZL(W_.size(),n_cols);
     MatrixXd LWL = MatrixXd::Identity(n_cols,n_cols);
-    MatrixXd LLWL(LWL.rows(), LWL.cols());
     MatrixXd yb(Mb.rows(), 1);
     double diff = 1.0;
     int itero = 0;
@@ -1260,7 +1374,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     while(diff > tol && itero < 10) {
       eta = xb + (ZL * Mb.col(0)).array();
       if(model.family.family == Fam::binomial || model.family.family == Fam::bernoulli) {
-        // Numerically stable sigmoid computation
         ArrayXd exp_neg_eta = (-eta).exp();
         ArrayXd logitp = 1.0 / (1.0 + exp_neg_eta);
         ArrayXd var_p = model.data.variance * logitp;
@@ -1271,9 +1384,8 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
         W_ = exp_eta.matrix();
         ymod = (eta + (model.data.y.array() - exp_eta) / exp_eta).matrix();
       }
-      // Recompute with updated weights
       WZL = (ZL.array().colwise() * W_.array()).matrix();
-      gpu_multiply(ZL.transpose(), WZL, LWL);
+      LWL = ZL.transpose() * WZL;
       LWL.diagonal().array() += 1.0;
       yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
       model.covariance.matL.compute(LWL);
@@ -1284,6 +1396,10 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     }
     model.covariance.matL.solveInPlace(Vb);
   }
+
+  auto t3 = high_resolution_clock::now();
+  ms_double = t3 - t2;
+  std::cout << "Timing (U fitting): " << ms_double.count() << "ms" << std::endl;
   
   // Optimized random number generation
   MatrixXd unew(re.u_.rows(), niter);
@@ -1293,6 +1409,7 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   
   // Fill matrix efficiently
   double* data = unew.data();
+#pragma omp parallel for schedule(dynamic)
   for(int i = 0; i < unew.size(); ++i) {
     data[i] = d(gen);
   }
@@ -1300,6 +1417,10 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   // Extract lower triangular for random effect simulation
   MatrixXd LVb(Vb.rows(), Vb.cols());
   model.covariance.matL.compute(Vb);
+
+  auto t4 = high_resolution_clock::now();
+  ms_double = t4 - t3;
+  std::cout << "Timing (U sampling): " << ms_double.count() << "ms" << std::endl;
   
   bool action_append = append;
   if(append && re.u_.cols() == 1)action_append = false;
@@ -1319,12 +1440,17 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     model.covariance.matL.productL(unew, re.u_);
     re.u_.colwise() += Mb.col(0);
   }
+  model.covariance.matL.reload();
   if (ZL.rows() == ZL.cols()) {
       re.zu_ = model.covariance.Lu(re.u_);
   }
   else {
       re.zu_ = model.covariance.ZLu(re.u_);
   }
-  model.covariance.matL.reload();
+
+  auto t5 = high_resolution_clock::now();
+  ms_double = t5 - t4;
+  std::cout << "Timing (U recalc Zu): " << ms_double.count() << "ms" << std::endl;
+ 
 }
 

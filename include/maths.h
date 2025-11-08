@@ -172,13 +172,101 @@ inline double mod_inv_func(const double& muin,
   return mu;
 }
 
+inline double ddhdmu(const double x, const glmmr::Family& family) {
+    double y;
+    switch (family.family) {
+    case Fam::poisson:
+    {
+        switch (family.link) {
+        case Link::identity:
+            y = exp(x);
+            break;
+        default:
+            y = exp(-1.0 * x);
+            break;
+        }
+        break;
+    }
+    case Fam::bernoulli: case Fam::binomial:
+    {
+        switch (family.link) {
+        case Link::loglink:
+            y = (1.0 - exp(x)) / (exp(x));
+            break;
+        case Link::identity:
+            y = x * (1.0 - x);
+            break;
+        case Link::probit:
+        {
+            double cdf = gaussian_cdf(x);
+            double pdf = gaussian_pdf(x);
+            y = (cdf * (1.0 - cdf)) * (1.0 / pdf);
+            break;
+        }
+        default:
+            double logitxb = 1.0 / (1.0 + exp(-1.0 * x));
+            y = 1.0 / (logitxb * (1.0 - logitxb));
+            break;
+        }
+        break;
+    }
+    case Fam::gaussian:
+    {
+        switch (family.link) {
+        case Link::loglink:
+            y = 1.0 / exp(x);
+            break;
+        default:
+            y = 1.0;
+            break;
+        }
+        break;
+    }
+    case Fam::gamma:
+    {
+        switch (family.link) {
+        case Link::inverse:
+            y = 1.0 / (x * x);
+            break;
+        case Link::identity:
+            y = x * x;
+            wdiag = xb.array().square().matrix();
+            break;
+        default:
+            //log
+            y = 1.0;
+            break;
+        }
+        break;
+    }
+    case Fam::beta:
+    {
+        double logitxb = 1.0 / (1.0 + exp(-1.0 * x));
+        y = 1.0 / (logitxb * (1.0 - logitxb));
+        break;
+    }
+    case Fam::quantile: case Fam::quantile_scaled:
+    {
+        throw std::runtime_error("Quantile disabled");
+        break;
+    }
+    }
+    return y;
+}
 
 inline Eigen::MatrixXd dhdmu(const Eigen::MatrixXd& xb,
                              const glmmr::Family& family) {
     Eigen::MatrixXd wdiag(xb.rows(), xb.cols());
-    Eigen::MatrixXd p(xb.rows(), xb.cols());
-  
-  switch(family.family){
+    //Eigen::MatrixXd p(xb.rows(), xb.cols());
+ 
+#pragma omp parallel for collapse(2) schedule(dynamic)
+    for (int i = 0; i < xb.rows(); i++) {
+        for (int j = 0; j < xb.cols(); j++) {
+            wdiag(i, j) = ddhdmu(xb(i, j));
+        }
+    }
+     
+  /*switch (family.family) {
     case Fam::poisson:
       {
         switch(family.link){
@@ -258,7 +346,7 @@ inline Eigen::MatrixXd dhdmu(const Eigen::MatrixXd& xb,
         throw std::runtime_error("Quantile disabled");
       break;
     }
-  }
+  }*/
   return wdiag;
 }
 

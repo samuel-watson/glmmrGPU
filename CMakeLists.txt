@@ -185,6 +185,7 @@ target_link_libraries(glmmrGPU PRIVATE
 if(OpenMP_CXX_FOUND)
     message(STATUS "Linking OpenMP")
     target_link_libraries(glmmrGPU PUBLIC OpenMP::OpenMP_CXX)
+    target_compile_options(glmmrGPU PRIVATE ${OpenMP_CXX_FLAGS})
 endif()
 
 get_target_property(SOURCES glmmrGPU SOURCES)
