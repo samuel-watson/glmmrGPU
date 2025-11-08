@@ -1111,7 +1111,7 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
 }
 
 template<typename modeltype>
-inline double glmmr::ModelMatrix<modeltype>::resid(const double x, const int i) {
+inline double glmmr::ModelMatrix<modeltype>::resid_calc(const double x, const int i) {
     double y;
     switch (model.family.family) {
     case Fam::poisson:

@@ -998,6 +998,30 @@ inline void glmmr::Covariance::make_sparse(){
       compact_col++;
     }
     dim = block_dim(b);
+
+#pragma omp parallel for schedule(dynamic)
+    for (int idx = 1; idx <= dim * (dim + 1) / 2; idx++) {
+        dblvec out(matrix_n);
+        double p = (sqrt(8.0 * idx + 1) - 1) / 2;
+        int i = (int)p;
+        int j;
+        if (i == p) {
+            i--;
+            j = i;
+        }
+        else {
+            j = idx - i * (i + 1) / 2 - 1;
+        }
+        val = get_val(b, i, j);
+        if (compact_fn && i != j) {
+            double dist = calc_[b].get_covariance_data(i, j, compact_col);
+            if (dist >= 1)val = 0;
+        }
+        matD(col_counter + i, col_counter + j) = val;
+        if (i != j) matD(col_counter + j, col_counter + i) = val;
+    }
+
+    /*
 #pragma omp parallel for schedule(dynamic)
     for(int i = 0; i < dim; i++){
       for(int j = 0; j < (i+1); j++){
@@ -1009,7 +1033,7 @@ inline void glmmr::Covariance::make_sparse(){
         matD(col_counter + i, col_counter + j) = val;
         if (i != j) matD(col_counter + j, col_counter + i) = val;
       }
-    }
+    }*/
     col_counter += dim;
   }
   matL.compute(matD);
