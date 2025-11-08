@@ -115,7 +115,7 @@ private:
   MatrixXd                        sigma_block(int b, bool inverse = false);
   MatrixXd                        sigma_builder(int b, bool inverse = false);
   MatrixXd                        information_matrix_by_block(int b);
-  double                          resid(const double x);
+  double                          resid_calc(const double x, const int i);
   bool                            useBlock = true;
   bool                            useSparse = true;
 };
@@ -962,7 +962,7 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
 #pragma omp parallel for collapse(2) schedule(dynamic)
   for (int i = 0; i < size_n_array.rows(); i++) {
       for (int j = 0; j < size_n_array.cols(); j++) {
-          double out = resid(size_n_array(i, j), i);
+          double out = resid_calc(size_n_array(i, j), i);
           size_n_array(i, j) = out;
       }
   }
@@ -1111,7 +1111,7 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
 }
 
 template<typename modeltype>
-inline double glmmr::ModelMatrix<modeltype>::resid(const double x, const double i) {
+inline double glmmr::ModelMatrix<modeltype>::resid(const double x, const int i) {
     double y;
     switch (model.family.family) {
     case Fam::poisson:

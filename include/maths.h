@@ -230,7 +230,6 @@ inline double ddhdmu(const double x, const glmmr::Family& family) {
             break;
         case Link::identity:
             y = x * x;
-            wdiag = xb.array().square().matrix();
             break;
         default:
             //log
@@ -262,7 +261,7 @@ inline Eigen::MatrixXd dhdmu(const Eigen::MatrixXd& xb,
 #pragma omp parallel for collapse(2) schedule(dynamic)
     for (int i = 0; i < xb.rows(); i++) {
         for (int j = 0; j < xb.cols(); j++) {
-            wdiag(i, j) = ddhdmu(xb(i, j));
+            wdiag(i, j) = ddhdmu(xb(i, j), family);
         }
     }
      
