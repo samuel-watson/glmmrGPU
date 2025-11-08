@@ -258,7 +258,7 @@ inline Eigen::MatrixXd dhdmu(const Eigen::MatrixXd& xb,
     Eigen::MatrixXd wdiag(xb.rows(), xb.cols());
     //Eigen::MatrixXd p(xb.rows(), xb.cols());
  
-#pragma omp parallel for collapse(2) schedule(dynamic)
+#pragma omp parallel for collapse(2) 
     for (int i = 0; i < xb.rows(); i++) {
         for (int j = 0; j < xb.cols(); j++) {
             wdiag(i, j) = ddhdmu(xb(i, j), family);

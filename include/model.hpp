@@ -172,23 +172,23 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
     VectorXd theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
     std::cout << "\nStarting values\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose() << std::endl;
     while (!converged && iter <= max_iter) {
+        std::cout << "\n-------------- ITER: " << iter << " ------------" << std::endl;
         auto t1 = high_resolution_clock::now();
         matrix.posterior_u_samples(niter);
         auto t2 = high_resolution_clock::now();
         duration<double, std::milli> ms_double = t2 - t1;
-        std::cout << "Timing (posterior u sample): " << ms_double.count() << "ms" << std::endl;
+        std::cout << "TIMING STEP 1 (posterior u sample): " << ms_double.count() << "ms" << std::endl;
         optim.nr_beta();
         auto t3 = high_resolution_clock::now();
         ms_double = t3 - t2;
-        std::cout << "Timing (nr beta): " << ms_double.count() << "ms" << std::endl;
+        std::cout << "TIMING STEP 2 (nr beta): " << ms_double.count() << "ms" << std::endl;
         optim.nr_theta();
         auto t4 = high_resolution_clock::now();
         ms_double = t4 - t3;
-        std::cout << "Timing (nr theta): " << ms_double.count() << "ms" << std::endl;
+        std::cout << "TIMING STEP 3 (nr theta): " << ms_double.count() << "ms" << std::endl;
         beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
         theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
         ll = optim.current_likelihood_values();
-        std::cout << "\n-------------- ITER: " << iter << " ------------" << std::endl;
         std::cout << "\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
         std::cout << "\nu: " << re.u_.topRows(5).rowwise().mean().transpose();
         std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second << std::endl;

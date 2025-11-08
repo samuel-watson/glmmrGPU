@@ -69,8 +69,19 @@ public:
   }
 
   void solve(const MatrixXd& x, MatrixXd& sol) {
-      //sol = x;
       chol_.solve(x, sol);
+  }
+
+  void computeAndSolve(const MatrixXd& a, const MatrixXd& x, MatrixXd& sol) {
+      chol_.computeAndSolve(a, x, sol);
+  }
+
+  void multCompSolve(const MatrixXd& a, const MatrixXd& b, const MatrixXd& c, MatrixXd& sol) {
+      chol_.multCompSolve(a, b, c, sol);
+  }
+
+  void multCompSolve2(const MatrixXd& a, const VectorXd& w, const MatrixXd& c, MatrixXd& sol) {
+      chol_.multCompSolve2(a, w, c, sol);
   }
   
   MatrixXd matrixL() {
@@ -102,7 +113,7 @@ public:
       if (L.rows() != matD.rows() || L.cols() != matD.cols()) {
           L.resize(matD.rows(), matD.cols());
       }
-      chol_.compute_cholesky(matD);
+      chol_.computeCholesky(matD);
   }
 
   void store() {
@@ -112,6 +123,10 @@ public:
 
   void reload() {
       chol_.upload(L);
+  }
+
+  void multiplyBuffer(const MatrixXd& A, const MatrixXd& B, MatrixXd& X) {
+      chol_.multiplyBuffer(A, B, X);
   }
 };
 
@@ -999,7 +1014,7 @@ inline void glmmr::Covariance::make_sparse(){
     }
     dim = block_dim(b);
 
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for 
     for (int idx = 1; idx <= dim * (dim + 1) / 2; idx++) {
         double p = (sqrt(8.0 * idx + 1) - 1) / 2;
         int i = (int)p;
@@ -1139,6 +1154,10 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   logdet_val = log_determinant();
   logl.array() += NEG_HALF_LOG_2PI * Q_ - 0.5 * logdet_val;
   // Convert to dense once
+
+  auto t2b = high_resolution_clock::now();
+  ms_double = t2b - t2;
+  std::cout << "Timing (log-det): " << ms_double.count() << "ms" << std::endl;
   
   std::vector<MatrixXd> S;
   for (int i = 0; i < npars; i++)
@@ -1162,7 +1181,7 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   {
       VectorXd dqf_thread = VectorXd::Zero(npars);
 
-#pragma omp for
+#pragma omp for 
       for (int i = 0; i < niter; i++)
       {
           double qf = vmat.col(i).dot(umat.col(i));
@@ -1223,7 +1242,7 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
         std::cout << "OpenMP using " << omp_get_num_threads() << " threads" << std::endl;
     }
 
-#pragma omp parallel for schedule(guided)
+#pragma omp parallel for 
     for (int idx = 1; idx <= block_dimension * (block_dimension + 1) / 2; idx++) {
         dblvec out(matrix_n);
         double p = (sqrt(8.0 * idx + 1) - 1) / 2;

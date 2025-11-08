@@ -959,7 +959,7 @@ inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
   SparseMatrix<double> ZL = model.covariance.ZL_sparse();
   size_n_array += (ZL * v).array();
 
-#pragma omp parallel for collapse(2) schedule(dynamic)
+#pragma omp parallel for collapse(2) 
   for (int i = 0; i < size_n_array.rows(); i++) {
       for (int j = 0; j < size_n_array.cols(); j++) {
           double out = resid_calc(size_n_array(i, j), i);
@@ -1353,20 +1353,26 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   
   if(model.family.family == Fam::gaussian) {
     MatrixXd WZL = (ZL.array().colwise() * W_.array()).matrix();
-    MatrixXd Pb = ZL.transpose() * WZL;
-    Pb.diagonal().array() += 1.0;
+    MatrixXd Pb(ZL.cols(), ZL.cols());
     MatrixXd yb(WZL.rows(), 1);
-    yb.col(0) = WZL.transpose() * (model.data.y - xb.matrix());
-    MatrixXd LPb(Pb.rows(), Pb.cols());
-    model.covariance.matL.compute(Pb);
-    model.covariance.matL.solve(yb, Mb);
+    VectorXd r = model.data.y - xb.matrix();
+    model.covariance.matL.multCompSolve2(ZL, W_, r, Mb);
+
+    //yb.col(0) = WZL.transpose() * (model.data.y - xb.matrix());
+    //model.covariance.matL.multiplyBuffer(ZL.transpose(), WZL, Pb);
+    //Pb.diagonal().array() += 1.0;
+    //model.covariance.matL.computeAndSolve(Pb, yb, Mb);
+    //model.covariance.matL.multCompSolve(ZL.transpose(), WZL, yb, Mb);    
+    //model.covariance.matL.solve(yb, Mb);
+
     model.covariance.matL.solveInPlace(Vb);
   } else {
     // // Initial setup
     Mb.col(0) = re.u_.rowwise().mean();
     MatrixXd bnew(Mb);
+    VectorXd r(W_.size());
     MatrixXd WZL(W_.size(),n_cols);
-    MatrixXd LWL = MatrixXd::Identity(n_cols,n_cols);
+    MatrixXd LWL(n_cols,n_cols);
     MatrixXd yb(Mb.rows(), 1);
     double diff = 1.0;
     int itero = 0;
@@ -1384,12 +1390,20 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
         W_ = exp_eta.matrix();
         ymod = (eta + (model.data.y.array() - exp_eta) / exp_eta).matrix();
       }
-      WZL = (ZL.array().colwise() * W_.array()).matrix();
-      LWL = ZL.transpose() * WZL;
-      LWL.diagonal().array() += 1.0;
-      yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
-      model.covariance.matL.compute(LWL);
-      model.covariance.matL.solve(yb, bnew);
+      r = (ymod - xb).matrix();
+      model.covariance.matL.multCompSolve2(ZL, W_, r, bnew);
+      /*
+#pragma omp parallel for schedule(dynamic)
+      for (int i = 0; i < ZL.cols(); i++) {
+          WZL.col(i) = (ZL.col(i).array() * W_.array()).matrix();
+      }   */   
+      //model.covariance.matL.multiplyBuffer(ZL.transpose(), WZL, LWL);
+      //LWL.diagonal().array() += 1.0;     
+      //model.covariance.matL.computeAndSolve(LWL, yb, bnew);
+      //yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
+      //model.covariance.matL.multCompSolve(ZL.transpose(), WZL, yb, bnew);
+      //model.covariance.matL.compute(LWL);
+      //model.covariance.matL.solve(yb, bnew);
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);
@@ -1409,7 +1423,7 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   
   // Fill matrix efficiently
   double* data = unew.data();
-#pragma omp parallel for schedule(dynamic)
+#pragma omp parallel for 
   for(int i = 0; i < unew.size(); ++i) {
     data[i] = d(gen);
   }
