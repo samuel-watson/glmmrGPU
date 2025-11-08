@@ -1001,7 +1001,6 @@ inline void glmmr::Covariance::make_sparse(){
 
 #pragma omp parallel for schedule(dynamic)
     for (int idx = 1; idx <= dim * (dim + 1) / 2; idx++) {
-        dblvec out(matrix_n);
         double p = (sqrt(8.0 * idx + 1) - 1) / 2;
         int i = (int)p;
         int j;
