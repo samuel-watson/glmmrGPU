@@ -199,15 +199,15 @@ int main() {
         std::cout << "\nGenerating predictions." << std::endl;
         int nrowpredict = std::stoi(config["nrowspred"]);
         ArrayXXd pred_data = (readMatrixFromCSV("Xp.csv", nrowpredict, ncols)).array();
-        ArrayXXd offset_new(nrowpredict, 1);
+        ArrayXd offset_new(nrowpredict);
         if (offset) {
-            offset_new = (readMatrixFromCSV("offsetp.csv", nrowpredict, 1)).array();
+            offset_new = (readMatrixFromCSV("offsetp.csv", nrowpredict, 1)).array().col(0);
         }
         else {
             offset_new.setZero();
         }
         VectorMatrix rep = model.re.predict_re(pred_data);
-        VectorXd xb = model.model.linear_predictor.predict_xb(pred_data, offset_new);
+        VectorXd xb = model.model.linear_predictor.predict_xb(pred_data, offset_new); 
         writeToCSVfile("pred_u_mean.csv", rep.vec);
         writeToCSVfile("pred_u_var.csv", rep.mat);
         writeToCSVfile("pred_xb.csv", xb);

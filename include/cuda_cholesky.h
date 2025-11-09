@@ -21,11 +21,13 @@ public:
     GPUCholeskyManager(const GPUCholeskyManager&) = delete;
     GPUCholeskyManager& operator=(const GPUCholeskyManager&) = delete;
     GPUCholeskyManager(int dim);
+    GPUCholeskyManager();
     ~GPUCholeskyManager();
 
     void upload(const Eigen::MatrixXd& A);
     void computeCholesky(const Eigen::MatrixXd& A);
     void solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
+    //void solveAndMultiplyTr(const Eigen::MatrixXd& B, const Eigen::MatrixXd& C, double& tr_val, Eigen::MatrixXd& X, Eigen::MatrixXd& Y);
     void computeAndSolve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X);
     void solveInPlace(Eigen::MatrixXd& B);
     void multCompSolve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, const Eigen::MatrixXd& C, Eigen::MatrixXd& X);

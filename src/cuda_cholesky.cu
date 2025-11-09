@@ -13,6 +13,34 @@ __global__ void addToDiagonal(double* matrix, int n, double value) {
     }
 }
 
+/*template<typename T>
+__global__ void trace_kernel(const T* A, int n, int lda, T* result) {
+    __shared__ T cache[256];
+    int tid = threadIdx.x;
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+
+    // Each thread handles one diagonal element
+    T sum = 0;
+    if (idx < n) {
+        sum = A[idx * lda + idx];  // A[i,i]
+    }
+
+    cache[tid] = sum;
+    __syncthreads();
+
+    // Reduction in shared memory
+    for (int s = blockDim.x / 2; s > 0; s >>= 1) {
+        if (tid < s) {
+            cache[tid] += cache[tid + s];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        atomicAdd(result, cache[0]);
+    }
+}*/
+
 #define CUDA_CHECK(call) \
     do { \
         cudaError_t err = call; \
@@ -120,18 +148,12 @@ GPUCholeskyManager::GPUCholeskyManager(int dim) : n(dim) {
     
 }
 
+GPUCholeskyManager::GPUCholeskyManager(){}
+
 GPUCholeskyManager::~GPUCholeskyManager() {
-    if (d_A) {
-        cudaFree(d_A);
-    }
-
-    if (d_B) {
-        cudaFree(d_B);
-    }
-
-    if (d_C) {
-        cudaFree(d_C);
-    }
+    if (d_A) cudaFree(d_A);
+    if (d_B) cudaFree(d_B);
+    if (d_C) cudaFree(d_C);
 
     if (cusolver_handle) {
         cusolverDnDestroy(*static_cast<cusolverDnHandle_t*>(cusolver_handle));
@@ -143,15 +165,10 @@ GPUCholeskyManager::~GPUCholeskyManager() {
         delete static_cast<cublasHandle_t*>(cublas_handle);
     }
 
-    if (h_pinned_A) {
-        cudaFreeHost(h_pinned_A);
-    }
-    if (h_pinned_B) {
-        cudaFreeHost(h_pinned_B);
-    }
-
-    cudaFree(d_work);
-    cudaFree(d_info);
+    if (h_pinned_A) cudaFreeHost(h_pinned_A);
+    if (h_pinned_B)cudaFreeHost(h_pinned_B);
+    if(d_work)cudaFree(d_work);
+    if(d_info)cudaFree(d_info);
 }
 
 void GPUCholeskyManager::upload(const Eigen::MatrixXd& A) {
@@ -468,6 +485,71 @@ void GPUCholeskyManager::solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X)
     CUDA_CHECK(cudaMemcpy(h_pinned_B, d_B, b_size, cudaMemcpyDeviceToHost));
     std::memcpy(X.data(), h_pinned_B, b_size);
 }
+
+/*
+void GPUCholeskyManager::solveAndMultiplyTr(const Eigen::MatrixXd& B, const Eigen::MatrixXd& C, double& tr_val, Eigen::MatrixXd& X, Eigen::MatrixXd& Y)
+{
+    if (!is_allocated) {
+        throw std::runtime_error("No L matrix to solve");
+    }
+    cusolverDnHandle_t h = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
+    cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
+
+    const int nrhs = B.cols();
+    const int other_cols = C.cols();
+    size_t b_size = n * nrhs * sizeof(double);
+    //CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double), cudaMemcpyHostToDevice));
+    std::memcpy(h_pinned_B, B.data(), b_size);
+    CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
+    std::memcpy(h_pinned_A, C.data(), b_size);
+    CUDA_CHECK(cudaMemcpy(d_C, h_pinned_A, b_size, cudaMemcpyHostToDevice));
+
+
+    CUSOLVER_CHECK(cusolverDnDpotrs(
+        h, CUBLAS_FILL_MODE_LOWER, n,
+        nrhs,     // Number of columns in B (and X)
+        d_A,      // Factorized matrix
+        n,        // Leading dimension of A
+        d_B,      // Input: B matrix, Output: X matrix
+        n,        // Leading dimension of B (number of rows)
+        d_info
+    ));
+
+    int info_h = 0;
+    CUDA_CHECK(cudaMemcpy(&info_h, d_info, sizeof(int), cudaMemcpyDeviceToHost));
+
+    if (info_h != 0) {
+        std::cerr << "Linear solve failed!" << std::endl;
+    }
+
+    double alpha = 1.0;
+    double beta = 0.0;
+    double* d_result;
+    cudaMalloc(&d_result, n * other_cols * sizeof(double));
+
+    // multiply
+    CUBLAS_CHECK(cublasDgemm(handle,
+        CUBLAS_OP_N, CUBLAS_OP_N,
+        n, other_cols, n,
+        &alpha,
+        d_B, n,
+        d_C, other_cols,
+        &beta,
+        d_result, n));
+
+    double* tr;
+    // Launch kernel
+    int threadsPerBlock = 256;
+    int blocks = (n + threadsPerBlock - 1) / threadsPerBlock;
+    trace_kernel<<<blocks, threadsPerBlock>>>(d_B, n, n, tr);
+    cudaMemcpy(&tr_val, tr, sizeof(double), cudaMemcpyDeviceToHost);
+
+    CUDA_CHECK(cudaMemcpy(h_pinned_B, d_result, b_size, cudaMemcpyDeviceToHost));
+    std::memcpy(X.data(), h_pinned_B, b_size);
+    CUDA_CHECK(cudaMemcpy(h_pinned_A, d_B, b_size, cudaMemcpyDeviceToHost));
+    std::memcpy(Y.data(), h_pinned_A, b_size);
+    cudaFree(d_result);
+}*/
 
 void GPUCholeskyManager::solveInPlace(Eigen::MatrixXd& B)
 {

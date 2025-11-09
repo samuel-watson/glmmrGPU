@@ -14,6 +14,8 @@ using namespace Eigen;
 
 namespace glmmr {
        
+struct no_matl_t {};
+inline constexpr no_matl_t NO_MATL{};
 
 inline bool validate_fn(const str& fn){
   bool not_fn = str_to_covfunc.find(fn) == str_to_covfunc.end();
@@ -41,25 +43,21 @@ inline bool any_match(T t, Vals ...vals)
 
 class CovarianceLLT {
 public:
-    //std::unique_ptr<GPUCholeskyManager> chol_;
     GPUCholeskyManager chol_;
     MatrixXd L;
     const int Q;
   
-  CovarianceLLT(const int Q_) : Q(Q_), L(Q_,Q_), chol_(Q_) {
-      //chol_ = std::make_unique<GPUCholeskyManager>(Q);
-  }
+  CovarianceLLT(const int Q_) : Q(Q_), L(Q_,Q_), chol_(Q_) {}
+  CovarianceLLT() : Q(0), L(1, 1) {}
   
   VectorXd solve(const VectorXd& x) {
       MatrixXd X(L.rows(), 1);
-      //X.col(0) = x;
      chol_.solve(x, X);
      return X.col(0);
   }
   
   MatrixXd solve(const MatrixXd& x) {
       MatrixXd sol(L.rows(), x.cols());
-      //sol = x;
       chol_.solve(x, sol);
       return sol;
   }
@@ -83,6 +81,10 @@ public:
   void multCompSolve2(const MatrixXd& a, const VectorXd& w, const MatrixXd& c, MatrixXd& sol) {
       chol_.multCompSolve2(a, w, c, sol);
   }
+
+  //void solveAndMultiplyTr(const MatrixXd& B, const MatrixXd& C, double& tr_val, MatrixXd& X, MatrixXd& Y) {
+  //    chol_.solveAndMultiplyTr(B, C, tr_val, X, Y);
+  //}
   
   MatrixXd matrixL() {
       store();
@@ -143,6 +145,7 @@ public:
   // constructors
   Covariance(const str& formula,const ArrayXXd &data,const strvec& colnames);
   Covariance(const glmmr::Formula& form,const ArrayXXd &data,const strvec& colnames);
+  Covariance(const glmmr::Formula& form, const ArrayXXd& data, const strvec& colnames, const no_matl_t x);
   Covariance(const str& formula,const ArrayXXd &data,const strvec& colnames,const dblvec& parameters);
   Covariance(const glmmr::Formula& form,const ArrayXXd &data,const strvec& colnames,const dblvec& parameters);
   Covariance(const str& formula,const ArrayXXd &data,const strvec& colnames,const ArrayXd& parameters);
@@ -221,7 +224,6 @@ protected:
   MatrixXd                        get_block(int b);
   MatrixXd                        get_chol_block(int b,bool upper = false);
   MatrixXd                        D_builder(int b,bool chol = false,bool upper = false);
-  void                            update_ax();
   //void                            L_constructor();
   void                            Z_constructor();
   void                            Z_updater();
@@ -229,6 +231,7 @@ protected:
   // logical flags
   bool                            sparse_initialised = false;
   bool                            sufficient_sparse = true;
+  bool                            no_matl = false;
 public:
   bool                            z_requires_update = false;
 protected:
@@ -253,6 +256,17 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
   Q_(parse()), matL(Q_),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   Z_constructor();
+};
+
+inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
+    const ArrayXXd& data,
+    const strvec& colnames,
+    const no_matl_t x) :
+    form_(form), data_(data), colnames_(colnames),
+    Q_(parse()), matL(1), matZ(data_.rows(), Q_), matD(Q_, Q_), dmat_matrix(max_block_dim(), max_block_dim()),
+    zquad(max_block_dim()) {
+    Z_constructor();
+    no_matl = true;
 };
 
 inline glmmr::Covariance::Covariance(const str& formula,
@@ -718,13 +732,8 @@ inline void glmmr::Covariance::update_parameters(const dblvec& parameters)
   }
   
   parameters_ = parameters;
-  update_parameters_in_calculators();
-  
-  if(!sparse_initialised){
-    make_sparse();
-  } else {
-    update_ax();
-  }
+  update_parameters_in_calculators();  
+  make_sparse();
 };
 
 inline void glmmr::Covariance::update_parameters_extern(const dblvec& parameters)
@@ -736,12 +745,7 @@ inline void glmmr::Covariance::update_parameters_extern(const dblvec& parameters
   
   parameters_ = parameters;
   update_parameters_in_calculators();
-  
-  if(!sparse_initialised){
-    make_sparse();
-  } else {
-    update_ax();
-  }
+  make_sparse();
 };
 
 inline void glmmr::Covariance::update_parameters(const ArrayXd& parameters)
@@ -756,7 +760,7 @@ inline void glmmr::Covariance::update_parameters(const ArrayXd& parameters)
       parameters_[i] = parameters(i);
     }
     update_parameters_in_calculators();
-    update_ax();
+    make_sparse();
   } else {
     throw std::runtime_error(std::to_string(parameters.size())+" covariance parameters provided, "+std::to_string(parameters_.size())+" required");
   }
@@ -1050,7 +1054,7 @@ inline void glmmr::Covariance::make_sparse(){
     }*/
     col_counter += dim;
   }
-  matL.compute(matD);
+  if(!no_matl) matL.compute(matD);
   sparse_initialised = true;
 };
 
@@ -1059,10 +1063,6 @@ inline void glmmr::Covariance::set_sparse(bool sparse){
   isSparse = sparse;
   if(sparse)make_sparse();
 }
-
-inline void glmmr::Covariance::update_ax(){
-    make_sparse();
-};
 
 inline MatrixXd glmmr::Covariance::D_sparse_builder(bool chol,
                                                     bool upper){
@@ -1164,9 +1164,10 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   {
       S.emplace_back(derivs[i + 1].rows(), derivs[i + 1].cols());
       matL.solve(derivs[i + 1], S[i]);
+      //matL.solveAndMultiplyTr(derivs[i + 1], vmat, grad(i), SV[i], S[i]);
       grad(i) = -0.5 * S[i].trace();
   }
-
+  //grad *= -0.5;
   auto t3 = high_resolution_clock::now();
   ms_double = t3 - t2;
   std::cout << "Timing (deriv-inverse trace): " << ms_double.count() << "ms" << std::endl;
@@ -1187,7 +1188,7 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
           double qf = vmat.col(i).dot(umat.col(i));
           logl(i) += -0.5 * qf;
           for (int j = 0; j < npars; j++)
-              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i));
+              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i)); //S[j] * vmat.col(i)
       }
 
 #pragma omp critical
