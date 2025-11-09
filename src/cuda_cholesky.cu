@@ -67,7 +67,7 @@ __global__ void trace_kernel(const T* A, int n, int lda, T* result) {
         } \
     } while(0)
 
-GPUCholeskyManager::GPUCholeskyManager(int dim) : n(dim) {
+GPUCholeskyManager::GPUCholeskyManager(int dim) : Tn(dim) {
     // Check CUDA device
     int deviceCount = 0;
     cudaError_t err = cudaGetDeviceCount(&deviceCount);
@@ -81,7 +81,7 @@ GPUCholeskyManager::GPUCholeskyManager(int dim) : n(dim) {
     cudaGetDeviceProperties(&prop, 0);
     std::cout << "\nUsing device: " << prop.name << std::endl;
 
-    matrix_size = n * n * sizeof(double);
+    matrix_size = Tn * Tn * sizeof(double);
     size_t free_mem, total_mem;
     cudaMemGetInfo(&free_mem, &total_mem);
 
@@ -142,7 +142,7 @@ GPUCholeskyManager::GPUCholeskyManager(int dim) : n(dim) {
 
     // Allocate workspace ONCE
     cusolverDnDpotrf_bufferSize(*static_cast<cusolverDnHandle_t*>(cusolver_handle), CUBLAS_FILL_MODE_LOWER,
-        n, d_A, n, &workspace_size);
+        Tn, d_A, Tn, &workspace_size);
     cudaMalloc(&d_work, workspace_size * sizeof(double));
     cudaMalloc(&d_info, sizeof(int));
     
@@ -175,6 +175,9 @@ void GPUCholeskyManager::upload(const Eigen::MatrixXd& A) {
     if (!is_allocated) {
         throw std::runtime_error("No allocated memory");
     }
+    Ln = A.rows();
+    if (Ln > Tn) throw std::runtime_error("Ln > n");
+    matrix_size = Ln * Ln * sizeof(double);
     std::memcpy(h_pinned_A, A.data(), matrix_size);
     cudaMemcpy(d_A, h_pinned_A, matrix_size, cudaMemcpyHostToDevice);
 }
@@ -186,9 +189,9 @@ void GPUCholeskyManager::computeCholesky(const Eigen::MatrixXd& A) {
     cusolverStatus_t status = cusolverDnDpotrf(
         handle,
         CUBLAS_FILL_MODE_LOWER,
-        n,
+        Ln,
         d_A,      // Device pointer
-        n,        // Leading dimension (should equal n for square matrix)
+        Ln,        // Leading dimension (should equal n for square matrix)
         d_work,   // Workspace
         workspace_size,    // Workspace size
         d_info    // Info output
@@ -229,7 +232,8 @@ void GPUCholeskyManager::computeAndSolve(const Eigen::MatrixXd& A, const Eigen::
     upload(A);
     cusolverDnHandle_t handle = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
     const int nrhs = B.cols();
-    size_t b_size = n * nrhs * sizeof(double);
+    size_t b_size = Ln * nrhs * sizeof(double);
+
     std::memcpy(h_pinned_A, A.data(), matrix_size);
     CUDA_CHECK(cudaMemcpy(d_A, h_pinned_A, matrix_size, cudaMemcpyHostToDevice));//, *static_cast<cudaStream_t*>(stream1)
     std::memcpy(h_pinned_B, B.data(), b_size);
@@ -239,9 +243,9 @@ void GPUCholeskyManager::computeAndSolve(const Eigen::MatrixXd& A, const Eigen::
     cusolverStatus_t status = cusolverDnDpotrf(
         handle,
         CUBLAS_FILL_MODE_LOWER,
-        n,
+        Ln,
         d_A,      // Device pointer
-        n,        // Leading dimension (should equal n for square matrix)
+        Ln,        // Leading dimension (should equal n for square matrix)
         d_work,   // Workspace
         workspace_size,    // Workspace size
         d_info    // Info output
@@ -277,8 +281,8 @@ void GPUCholeskyManager::computeAndSolve(const Eigen::MatrixXd& A, const Eigen::
     }
 
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        handle, CUBLAS_FILL_MODE_LOWER, n, nrhs,     
-        d_A, n, d_B, n, d_info
+        handle, CUBLAS_FILL_MODE_LOWER, Ln, nrhs,     
+        d_A, Ln, d_B, Ln, d_info
     ));
 
     int info_h = 0;
@@ -294,13 +298,14 @@ void GPUCholeskyManager::computeAndSolve(const Eigen::MatrixXd& A, const Eigen::
 }
 
 void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, const Eigen::MatrixXd& C, Eigen::MatrixXd& X) {
-    if (A.rows() > n || A.cols() > n || B.rows() > n || B.cols() > n) throw std::runtime_error("Max dim. for multiplyBuffer is n");
+    if (A.rows() > Tn || A.cols() > Tn || B.rows() > Tn || B.cols() > Tn) throw std::runtime_error("Max dim. for multiplyBuffer is n");
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     cusolverDnHandle_t handles = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
     const int m = A.rows();
     const int k = A.cols();
     const int l = B.cols();
     const int nrhs = C.cols();
+    Ln = m;
     size_t a_size = m * k * sizeof(double);
     size_t b_size = k * l * sizeof(double);
     size_t c_size = m * l * sizeof(double);
@@ -311,16 +316,17 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
     double alpha = 1.0f;
     double beta = 0.0f;
+
     CUBLAS_CHECK(cublasDgemm(handle,
         CUBLAS_OP_N, CUBLAS_OP_N, m, l, k,
         &alpha,d_C, m,d_B, k,&beta, d_A, m));
 
     int blockSize = 256;
-    int numBlocks = (n + blockSize - 1) / blockSize;
-    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, n, 1.0);
+    int numBlocks = (m + blockSize - 1) / blockSize;
+    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, m, 1.0);
 
     cusolverStatus_t status = cusolverDnDpotrf(
-        handles, CUBLAS_FILL_MODE_LOWER, n, d_A, n,     
+        handles, CUBLAS_FILL_MODE_LOWER, m, d_A, m,     
         d_work, workspace_size, d_info    
     );
 
@@ -346,8 +352,8 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
     cudaDeviceSynchronize();
 
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        handles, CUBLAS_FILL_MODE_LOWER, n, nrhs, d_A,      
-        n, d_B,  n, d_info
+        handles, CUBLAS_FILL_MODE_LOWER, m, nrhs, d_A,      
+        m, d_B,  m, d_info
     ));
 
     int info_h = 0;
@@ -362,16 +368,19 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
 }
 
 void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::VectorXd& W, const Eigen::VectorXd& C, Eigen::MatrixXd& X) {
-    if (A.rows() > n || A.cols() > n || W.size() > n) throw std::runtime_error("Max dim. for multiplyBuffer is n");
-    
+    if (A.rows() > Tn || A.cols() > Tn || W.size() > Tn) {
+        std::cout << A.rows() << " " << A.cols() << " " << W.size() << " " << Tn << std::endl;
+        throw std::runtime_error("Max dim. for multiplyBuffer is n");
+    }
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     cusolverDnHandle_t handles = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
     const int m = A.rows();
     const int k = A.cols();
     const int nrhs = C.cols();
+    Ln = k;
     size_t a_size = m * k * sizeof(double);
     size_t w_size = m * sizeof(double);
-    size_t d_size = m * sizeof(double);
+    size_t c_size = k * sizeof(double);
     std::memcpy(h_pinned_A, A.data(), a_size);
     CUDA_CHECK(cudaMemcpy(d_C, h_pinned_A, a_size, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_A, a_size, cudaMemcpyHostToDevice));
@@ -395,12 +404,12 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
 
     // X^T * W * X + 1
     int blockSize = 256;
-    int numBlocks = (n + blockSize - 1) / blockSize;
-    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, n, 1.0);
+    int numBlocks = (k + blockSize - 1) / blockSize;
+    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, k, 1.0);
 
     // cholesky factorisation
     cusolverStatus_t status = cusolverDnDpotrf(
-        handles,CUBLAS_FILL_MODE_LOWER,n,d_A, n,       
+        handles,CUBLAS_FILL_MODE_LOWER,Ln,d_A, Ln,       
         d_work,  workspace_size, d_info   
     );
 
@@ -421,12 +430,12 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
         throw std::runtime_error("Info copy failed");
     }
 
-    std::memcpy(h_pinned_A, C.data(), d_size);
-    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, d_size, cudaMemcpyHostToDevice));
+    std::memcpy(h_pinned_A, C.data(), c_size);
+    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, c_size, cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
 
     double* d_result;
-    cudaMalloc(&d_result, d_size);
+    cudaMalloc(&d_result, c_size);
 
     // W^T X^T y
     CUBLAS_CHECK(cublasDgemv(
@@ -436,8 +445,8 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
 
     // (X^T * W * X + 1)^-1 W^T X^T y
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        handles, CUBLAS_FILL_MODE_LOWER,n,1,     
-        d_A, n, d_result, n, d_info
+        handles, CUBLAS_FILL_MODE_LOWER,Ln,1,     
+        d_A, Ln, d_result, Ln, d_info
     ));
 
     int info_h = 0;
@@ -447,8 +456,8 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
         std::cerr << "Linear solve failed!" << std::endl;
     }
 
-    CUDA_CHECK(cudaMemcpy(h_pinned_B, d_result, d_size, cudaMemcpyDeviceToHost));
-    std::memcpy(X.data(), h_pinned_B, d_size);
+    CUDA_CHECK(cudaMemcpy(h_pinned_B, d_result, c_size, cudaMemcpyDeviceToHost));
+    std::memcpy(X.data(), h_pinned_B, c_size);
 }
 
 void GPUCholeskyManager::solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X)
@@ -458,20 +467,17 @@ void GPUCholeskyManager::solve(const Eigen::MatrixXd& B, Eigen::MatrixXd& X)
     }
     cusolverDnHandle_t h = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
     const int nrhs = B.cols();
-    size_t b_size = n * nrhs * sizeof(double);
-    //CUDA_CHECK(cudaMemcpy(d_B, B.data(), n * nrhs * sizeof(double), cudaMemcpyHostToDevice));
+    size_t b_size = Ln * nrhs * sizeof(double);
     std::memcpy(h_pinned_B, B.data(), b_size);
-    CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
-
-   
+    CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));   
 
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        h, CUBLAS_FILL_MODE_LOWER, n,
+        h, CUBLAS_FILL_MODE_LOWER, Ln,
         nrhs,     // Number of columns in B (and X)
         d_A,      // Factorized matrix
-        n,        // Leading dimension of A
+        Ln,        // Leading dimension of A
         d_B,      // Input: B matrix, Output: X matrix
-        n,        // Leading dimension of B (number of rows)
+        Ln,        // Leading dimension of B (number of rows)
         d_info
     ));
     
@@ -558,7 +564,7 @@ void GPUCholeskyManager::solveInPlace(Eigen::MatrixXd& B)
     }
     cusolverDnHandle_t h = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
     const int nrhs = B.cols();
-    size_t b_size = n * nrhs * sizeof(double);
+    size_t b_size = Ln * nrhs * sizeof(double);
 
     std::memcpy(h_pinned_B, B.data(), b_size);
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
@@ -566,12 +572,12 @@ void GPUCholeskyManager::solveInPlace(Eigen::MatrixXd& B)
     CUSOLVER_CHECK(cusolverDnDpotrs(
         h,
         CUBLAS_FILL_MODE_LOWER,
-        n,
+        Ln,
         nrhs,     // Number of columns in B (and X)
         d_A,      // Factorized matrix
-        n,        // Leading dimension of A
+        Ln,        // Leading dimension of A
         d_B,      // Input: B matrix, Output: X matrix
-        n,        // Leading dimension of B (number of rows)
+        Ln,        // Leading dimension of B (number of rows)
         d_info
     ));
 
@@ -588,9 +594,9 @@ void GPUCholeskyManager::solveInPlace(Eigen::MatrixXd& B)
 }
 
 void GPUCholeskyManager::download(Eigen::MatrixXd& X) {
-    if (X.rows() != n || X.cols() != n) {
-        std::cout << "Resizing Eigen matrix to " << n << "x" << n << std::endl;
-        X.resize(n, n);
+    if (X.rows() != Ln || X.cols() != Ln) {
+        std::cout << "Resizing Eigen matrix to " << Ln << "x" << Ln << std::endl;
+        X.resize(Ln, Ln);
     }
     cudaPointerAttributes attributes;
     cudaError_t err = cudaPointerGetAttributes(&attributes, d_A);
@@ -625,20 +631,20 @@ void GPUCholeskyManager::multiplyByMatrix(const Eigen::MatrixXd& B, Eigen::Matri
     }
 
     const int other_cols = B.cols();
-    if (other_cols > n) throw std::runtime_error("Too many columns for GPU multiplication in B");
+    if (other_cols > Tn) throw std::runtime_error("Too many columns for GPU multiplication in B");
 
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     const double alpha = 1.0;
     
-    size_t b_size = n * other_cols * sizeof(double);
+    size_t b_size = Ln * other_cols * sizeof(double);
     std::memcpy(h_pinned_B, B.data(), b_size);
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
 
     cublasStatus_t status = cublasDtrmm(
         handle,  CUBLAS_SIDE_LEFT,  CUBLAS_FILL_MODE_LOWER,     
         CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT,       
-        n,  other_cols,  &alpha, d_A, n,                    
-        d_B, n,  d_C, n                 
+        Ln,  other_cols,  &alpha, d_A, Ln,                    
+        d_B, Ln,  d_C, Ln                 
     );
 
     if (status != CUBLAS_STATUS_SUCCESS) {
@@ -656,7 +662,7 @@ void GPUCholeskyManager::leftMultiplyByMatrix(const Eigen::MatrixXd& B, Eigen::M
     }
 
     const int other_cols = B.rows();
-    if (other_cols > n) throw std::runtime_error("Too many columns for GPU multiplication in B");
+    if (other_cols > Tn) throw std::runtime_error("Too many columns for GPU multiplication in B");
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     const double alpha = 1.0;
 
@@ -667,14 +673,14 @@ void GPUCholeskyManager::leftMultiplyByMatrix(const Eigen::MatrixXd& B, Eigen::M
         throw std::runtime_error("Previous CUDA error detected");
     }
 
-    size_t b_size = n * other_cols * sizeof(double);
+    size_t b_size = Ln * other_cols * sizeof(double);
     std::memcpy(h_pinned_B, B.data(), b_size);
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_B, b_size, cudaMemcpyHostToDevice));
 
     cublasStatus_t status = cublasDtrmm(
         handle,CUBLAS_SIDE_RIGHT,CUBLAS_FILL_MODE_LOWER,    
         CUBLAS_OP_N, CUBLAS_DIAG_NON_UNIT, other_cols,                          
-        n, &alpha,  d_A, n,d_B, other_cols,d_C, other_cols                
+        Ln, &alpha,  d_A, Ln,d_B, other_cols,d_C, other_cols                
     );
 
     if (status != CUBLAS_STATUS_SUCCESS) {
@@ -689,7 +695,7 @@ void GPUCholeskyManager::leftMultiplyByMatrix(const Eigen::MatrixXd& B, Eigen::M
 
 void GPUCholeskyManager::multiplyBuffer(const Eigen::MatrixXd& A, const Eigen::MatrixXd& B, Eigen::MatrixXd& X) {
     
-    if (A.rows() > n || A.cols() > n || B.rows() > n || B.cols() > n) throw std::runtime_error("Max dim. for multiplyBuffer is n");
+    if (A.rows() > Tn || A.cols() > Tn || B.rows() > Tn || B.cols() > Tn) throw std::runtime_error("Max dim. for multiplyBuffer is n");
     double* d_result = nullptr;
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
 

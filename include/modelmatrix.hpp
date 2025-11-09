@@ -952,7 +952,7 @@ inline BoxResults glmmr::ModelMatrix<modeltype>::box(){
 template<typename modeltype>
 inline MatrixXd glmmr::ModelMatrix<modeltype>::gradient_eta(const MatrixXd& v){
   
-  ArrayXXd size_n_array(v.rows(), v.cols());
+  ArrayXXd size_n_array(model.n(), v.cols());
   size_n_array.setZero();
   if(size_n_array.rows() != model.n())throw std::runtime_error("Size n array != n");
   size_n_array.colwise() += model.xb();
@@ -1357,14 +1357,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     MatrixXd yb(WZL.rows(), 1);
     VectorXd r = model.data.y - xb.matrix();
     model.covariance.matL.multCompSolve2(ZL, W_, r, Mb);
-
-    //yb.col(0) = WZL.transpose() * (model.data.y - xb.matrix());
-    //model.covariance.matL.multiplyBuffer(ZL.transpose(), WZL, Pb);
-    //Pb.diagonal().array() += 1.0;
-    //model.covariance.matL.computeAndSolve(Pb, yb, Mb);
-    //model.covariance.matL.multCompSolve(ZL.transpose(), WZL, yb, Mb);    
-    //model.covariance.matL.solve(yb, Mb);
-
     model.covariance.matL.solveInPlace(Vb);
   } else {
     // // Initial setup
@@ -1392,18 +1384,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
       }
       r = (ymod - xb).matrix();
       model.covariance.matL.multCompSolve2(ZL, W_, r, bnew);
-      /*
-#pragma omp parallel for schedule(dynamic)
-      for (int i = 0; i < ZL.cols(); i++) {
-          WZL.col(i) = (ZL.col(i).array() * W_.array()).matrix();
-      }   */   
-      //model.covariance.matL.multiplyBuffer(ZL.transpose(), WZL, LWL);
-      //LWL.diagonal().array() += 1.0;     
-      //model.covariance.matL.computeAndSolve(LWL, yb, bnew);
-      //yb.col(0) = WZL.transpose() * (ymod - xb).matrix();
-      //model.covariance.matL.multCompSolve(ZL.transpose(), WZL, yb, bnew);
-      //model.covariance.matL.compute(LWL);
-      //model.covariance.matL.solve(yb, bnew);
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);

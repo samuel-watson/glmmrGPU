@@ -11,7 +11,8 @@ public:
     int* d_info = nullptr;
     void* cusolver_handle;
     void* cublas_handle;
-    int n;
+    int Tn; // total sample size
+    int Ln;// A matrix dimension
     size_t matrix_size;
     int workspace_size;
     bool is_allocated = false;

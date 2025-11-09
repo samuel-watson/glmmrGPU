@@ -764,13 +764,11 @@ inline void glmmr::ModelOptim<modeltype>::nr_beta(){
   default:
     nvar_par.setConstant(1.0);
   }
-  
   MatrixXd XtWXm = MatrixXd::Zero(P(), P());
   MatrixXd W = glmmr::maths::dhdmu(zd, model.family);
   W = (W.array().colwise() * nvar_par).inverse();
   W.array().colwise() *= model.data.weights;
   MatrixXd resid = matrix.gradient_eta(re.u_);
-
   auto t2 = high_resolution_clock::now();
   duration<double, std::milli> ms_double = t2 - t1;
   std::cout << "Timing (NR beta setup): " << ms_double.count() << "ms" << std::endl;

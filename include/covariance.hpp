@@ -243,7 +243,7 @@ protected:
 inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
-  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matL(Q_), matZ(data_.rows(),Q_), matD(Q_,Q_),
+  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_), matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
     Z_constructor();
@@ -253,7 +253,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
   form_(form), data_(data), colnames_(colnames),
-  Q_(parse()), matL(Q_),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   Z_constructor();
 };
@@ -274,7 +274,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(formula), data_(data), colnames_(colnames), parameters_(parameters), 
-  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -285,7 +285,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(form), data_(data), colnames_(colnames), parameters_(parameters),
-  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -297,7 +297,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXd& parameters) :
   form_(formula), data_(data), colnames_(colnames),
   parameters_(parameters.data(),parameters.data()+parameters.size()),
-  Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_),
+  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -309,7 +309,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const ArrayXd& parameters) :
   form_(form), data_(data), colnames_(colnames),
-  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),
+  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),
   matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -318,7 +318,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
 
 inline glmmr::Covariance::Covariance(const glmmr::Covariance& cov) : form_(cov.form_), data_(cov.data_),
 colnames_(cov.colnames_),
-parameters_(cov.parameters_), Q_(parse()), matL(Q_), matZ(data_.rows(),Q_),matD(Q_,Q_),
+parameters_(cov.parameters_), Q_(parse()), matL(data_.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_),
 dmat_matrix(max_block_dim(),max_block_dim()),
 zquad(max_block_dim()) {
   make_sparse();
