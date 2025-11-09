@@ -430,8 +430,8 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
         throw std::runtime_error("Info copy failed");
     }
 
-    std::memcpy(h_pinned_A, C.data(), c_size);
-    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, c_size, cudaMemcpyHostToDevice));
+    std::memcpy(h_pinned_A, C.data(), w_size);
+    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, w_size, cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
 
     double* d_result;

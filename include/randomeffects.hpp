@@ -59,7 +59,6 @@ inline VectorMatrix glmmr::RandomEffects<bits>::predict_re(const ArrayXXd& newda
   // generate the merged data
   int nnew = newdata_.rows();
   ArrayXXd mergedata(model.n()+nnew,model.covariance.data_.cols());
-  std::cout << "model.covariance.data_:\n" << model.covariance.data_.topRows(10) << std::endl;
   mergedata.topRows(model.n()) = model.covariance.data_;
   mergedata.bottomRows(nnew) = newdata_;
   
@@ -69,8 +68,6 @@ inline VectorMatrix glmmr::RandomEffects<bits>::predict_re(const ArrayXXd& newda
                            NO_MATL);
 
   covariancenew.update_parameters(model.covariance.parameters_);
-  // //generate sigma
-  
   int newQ = covariancenew.Q() - model.covariance.Q();
   std::cout << "\nNew Q: " << newQ << std::endl;
   VectorMatrix result(newQ);

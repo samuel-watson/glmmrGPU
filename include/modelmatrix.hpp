@@ -1361,6 +1361,9 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   } else {
     // // Initial setup
     Mb.col(0) = re.u_.rowwise().mean();
+    if (Mb.array().col(0).isNaN().any()) {
+        std::cerr << "Error mb nan" << std::endl;
+    }
     MatrixXd bnew(Mb);
     VectorXd r(W_.size());
     MatrixXd WZL(W_.size(),n_cols);
@@ -1387,8 +1390,15 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);
+      std::cout << "u: " << bnew.col(0).head(10).transpose() << std::endl;
+      if (Mb.col(0).array().isNaN().any()) {
+          std::cerr << "Error mb nan " << itero << std::endl;
+      }
     }
     model.covariance.matL.solveInPlace(Vb);
+    if (Vb.array().isNaN().any()) {
+        std::cerr << "Error Vb nan " << std::endl;
+    }
   }
 
   auto t3 = high_resolution_clock::now();

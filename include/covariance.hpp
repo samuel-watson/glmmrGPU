@@ -1164,15 +1164,13 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   {
       S.emplace_back(derivs[i + 1].rows(), derivs[i + 1].cols());
       matL.solve(derivs[i + 1], S[i]);
-      //matL.solveAndMultiplyTr(derivs[i + 1], vmat, grad(i), SV[i], S[i]);
       grad(i) = -0.5 * S[i].trace();
   }
-  //grad *= -0.5;
+
   auto t3 = high_resolution_clock::now();
   ms_double = t3 - t2;
   std::cout << "Timing (deriv-inverse trace): " << ms_double.count() << "ms" << std::endl;
 
-  //dblvec dqf_local(npars, 0.0);
   dblvec v_buffer_local(Q_);
   MatrixXd vmat(umat.rows(), umat.cols());
   matL.solve(umat, vmat);
@@ -1188,7 +1186,7 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
           double qf = vmat.col(i).dot(umat.col(i));
           logl(i) += -0.5 * qf;
           for (int j = 0; j < npars; j++)
-              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i)); //S[j] * vmat.col(i)
+              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i)); 
       }
 
 #pragma omp critical
@@ -1214,6 +1212,7 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   ms_double = t5 - t4;
   std::cout << "Timing (Hessian): " << ms_double.count() << "ms" << std::endl;
   VectorXd theta_curr = Map<VectorXd>(parameters_.data(), parameters_.size());
+  std::cout << "\nM:\n" << M << std::endl;
   theta_curr += M.llt().solve(grad);
   update_parameters(theta_curr.array());
 }
