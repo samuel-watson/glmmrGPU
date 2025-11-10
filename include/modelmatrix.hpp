@@ -1360,17 +1360,15 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     model.covariance.matL.solveInPlace(Vb);
   } else {
     // // Initial setup
-    Mb.col(0) = re.u_.rowwise().mean();
-    if (Mb.array().col(0).isNaN().any()) {
-        std::cerr << "Error mb nan" << std::endl;
-    }
-    MatrixXd bnew(Mb);
-    VectorXd r(W_.size());
-    MatrixXd WZL(W_.size(),n_cols);
-    MatrixXd LWL(n_cols,n_cols);
-    MatrixXd yb(Mb.rows(), 1);
-    double diff = 1.0;
-    int itero = 0;
+        MatrixXd bnew(Mb);
+        VectorXd r(W_.size());
+        MatrixXd WZL(W_.size(), n_cols);
+        MatrixXd LWL(n_cols, n_cols);
+        MatrixXd yb(Mb.rows(), 1);
+        double diff = 1.0;
+        int itero = 0;
+
+    Mb.col(0) = re.u_.rowwise().mean();          
     
     while(diff > tol && itero < 10) {
       eta = xb + (ZL * Mb.col(0)).array();
@@ -1390,15 +1388,11 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
       diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
       itero++;
       Mb.col(0) = bnew.col(0);
-      std::cout << "u: " << bnew.col(0).head(10).transpose() << std::endl;
-      if (Mb.col(0).array().isNaN().any()) {
-          std::cerr << "Error mb nan " << itero << std::endl;
+      if (Mb.array().col(0).isNaN().any()) {
+          throw std::runtime_error("NaN in u from u fitting");
       }
     }
     model.covariance.matL.solveInPlace(Vb);
-    if (Vb.array().isNaN().any()) {
-        std::cerr << "Error Vb nan " << std::endl;
-    }
   }
 
   auto t3 = high_resolution_clock::now();

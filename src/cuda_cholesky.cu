@@ -301,15 +301,14 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
     if (A.rows() > Tn || A.cols() > Tn || B.rows() > Tn || B.cols() > Tn) throw std::runtime_error("Max dim. for multiplyBuffer is n");
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     cusolverDnHandle_t handles = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
-    const int m = A.rows();
-    const int k = A.cols();
-    const int l = B.cols();
+
+    // A is Ln * Tn, B is Tn * Ln, C is Ln * nrhs 
+
     const int nrhs = C.cols();
-    Ln = m;
-    size_t a_size = m * k * sizeof(double);
-    size_t b_size = k * l * sizeof(double);
-    size_t c_size = m * l * sizeof(double);
-    size_t d_size = m * nrhs * sizeof(double);
+    Ln = A.rows();
+    size_t a_size = Ln * Tn * sizeof(double);
+    size_t b_size = Tn * Ln * sizeof(double);
+    size_t c_size = Ln * nrhs * sizeof(double);
     std::memcpy(h_pinned_A, A.data(), a_size);
     CUDA_CHECK(cudaMemcpy(d_C, h_pinned_A, a_size, cudaMemcpyHostToDevice));
     std::memcpy(h_pinned_B, B.data(), b_size);
@@ -317,16 +316,30 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
     double alpha = 1.0f;
     double beta = 0.0f;
 
+    // A * B
     CUBLAS_CHECK(cublasDgemm(handle,
-        CUBLAS_OP_N, CUBLAS_OP_N, m, l, k,
-        &alpha,d_C, m,d_B, k,&beta, d_A, m));
+        CUBLAS_OP_N, CUBLAS_OP_N, 
+        Ln, // rows of A
+        Ln, // cols of B
+        Tn, // inner dim (cols of A)
+        &alpha,
+        d_C, // A
+        Ln,  // leading dim of A
+        d_B, // B
+        Tn, // leading dim of B
+        &beta, 
+        d_A, // result
+        Ln)); // leading dim of result
 
     int blockSize = 256;
-    int numBlocks = (m + blockSize - 1) / blockSize;
-    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, m, 1.0);
+    int numBlocks = (Ln + blockSize - 1) / blockSize;
+    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, Ln, 1.0);
 
     cusolverStatus_t status = cusolverDnDpotrf(
-        handles, CUBLAS_FILL_MODE_LOWER, m, d_A, m,     
+        handles, CUBLAS_FILL_MODE_LOWER, 
+        Ln, 
+        d_A, 
+        Ln,     
         d_work, workspace_size, d_info    
     );
 
@@ -347,13 +360,19 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
         throw std::runtime_error("Info copy failed");
     }
 
-    std::memcpy(h_pinned_A, C.data(), d_size);
-    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, d_size, cudaMemcpyHostToDevice));
+    std::memcpy(h_pinned_A, C.data(), c_size);
+    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, c_size, cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
 
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        handles, CUBLAS_FILL_MODE_LOWER, m, nrhs, d_A,      
-        m, d_B,  m, d_info
+        handles, CUBLAS_FILL_MODE_LOWER, 
+        Ln, 
+        nrhs, 
+        d_A,      
+        Ln, 
+        d_B,  
+        Ln, 
+        d_info
     ));
 
     int info_h = 0;
@@ -363,8 +382,8 @@ void GPUCholeskyManager::multCompSolve(const Eigen::MatrixXd& A, const Eigen::Ma
         std::cerr << "Linear solve failed!" << std::endl;
     }
 
-    CUDA_CHECK(cudaMemcpy(h_pinned_B, d_B, d_size, cudaMemcpyDeviceToHost));
-    std::memcpy(X.data(), h_pinned_B, d_size);
+    CUDA_CHECK(cudaMemcpy(h_pinned_B, d_B, c_size, cudaMemcpyDeviceToHost));
+    std::memcpy(X.data(), h_pinned_B, c_size);
 }
 
 void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::VectorXd& W, const Eigen::VectorXd& C, Eigen::MatrixXd& X) {
@@ -374,13 +393,15 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
     }
     cublasHandle_t handle = *static_cast<cublasHandle_t*>(cublas_handle);
     cusolverDnHandle_t handles = *static_cast<cusolverDnHandle_t*>(cusolver_handle);
-    const int m = A.rows();
-    const int k = A.cols();
+    // A is Tn * Ln
+    // W is Tn
+    // C is Tn
+    // output X is Ln x niter
     const int nrhs = C.cols();
-    Ln = k;
-    size_t a_size = m * k * sizeof(double);
-    size_t w_size = m * sizeof(double);
-    size_t c_size = k * sizeof(double);
+    Ln = A.cols();
+    size_t a_size = Tn * Ln * sizeof(double);
+    size_t w_size = Tn * sizeof(double);
+    size_t c_size = Ln * sizeof(double);
     std::memcpy(h_pinned_A, A.data(), a_size);
     CUDA_CHECK(cudaMemcpy(d_C, h_pinned_A, a_size, cudaMemcpyHostToDevice));
     CUDA_CHECK(cudaMemcpy(d_B, h_pinned_A, a_size, cudaMemcpyHostToDevice));
@@ -389,8 +410,15 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
 
     // W * X
     CUBLAS_CHECK(cublasDdgmm(
-        handle, CUBLAS_SIDE_LEFT, m,k, d_C, m, d_A, 1,  
-        d_C,  m           
+        handle, CUBLAS_SIDE_LEFT, 
+        Tn, // X rows
+        Ln, // X cols
+        d_C, // X ref
+        Tn, // leading dim of X
+        d_A, // diag mat
+        1,  // stride of W
+        d_B,  // output
+        Tn     // leading dimension of matrix to store result      
     ));
 
     double alpha = 1.0;
@@ -398,19 +426,34 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
 
     // X^T * W * X
     CUBLAS_CHECK(cublasDgemm(
-        handle, CUBLAS_OP_T, CUBLAS_OP_N,k, k, 
-        m, &alpha,d_B, m, d_C,m, &beta,d_A, k   
+        handle, CUBLAS_OP_T, CUBLAS_OP_N,
+        Ln, // X^T rows
+        Tn, // WX rows
+        Tn, // X^T cols / WX rows
+        &alpha,
+        d_C, // X
+        Tn, // leading dim of A
+        d_B, // WX
+        Tn, // leading dimension of WX
+        &beta,
+        d_A, // result
+        Ln    // leading dim of result
     ));
 
     // X^T * W * X + 1
     int blockSize = 256;
-    int numBlocks = (k + blockSize - 1) / blockSize;
-    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, k, 1.0);
+    int numBlocks = (Ln + blockSize - 1) / blockSize;
+    ::addToDiagonal<<<numBlocks, blockSize>>>(d_A, Ln, 1.0);
 
     // cholesky factorisation
     cusolverStatus_t status = cusolverDnDpotrf(
-        handles,CUBLAS_FILL_MODE_LOWER,Ln,d_A, Ln,       
-        d_work,  workspace_size, d_info   
+        handles,CUBLAS_FILL_MODE_LOWER,
+        Ln,
+        d_A, 
+        Ln,       
+        d_work, 
+        workspace_size,
+        d_info   
     );
 
     if (status != CUSOLVER_STATUS_SUCCESS) {
@@ -431,7 +474,7 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
     }
 
     std::memcpy(h_pinned_A, C.data(), w_size);
-    CUDA_CHECK(cudaMemcpyAsync(d_B, h_pinned_A, w_size, cudaMemcpyHostToDevice));
+    CUDA_CHECK(cudaMemcpyAsync(d_C, h_pinned_A, w_size, cudaMemcpyHostToDevice));
     cudaDeviceSynchronize();
 
     double* d_result;
@@ -439,14 +482,29 @@ void GPUCholeskyManager::multCompSolve2(const Eigen::MatrixXd& A, const Eigen::V
 
     // W^T X^T y
     CUBLAS_CHECK(cublasDgemv(
-        handle, CUBLAS_OP_T,  m,  k,&alpha,       
-        d_C, m, d_B,1, &beta,d_result,1                
+        handle, CUBLAS_OP_T,  
+        Tn,  // rows of WX
+        Ln,  // cols of WX
+        &alpha,       
+        d_B, // WX
+        Tn, // leading dim of WX
+        d_C,  // y
+        1, // stride of x
+        &beta,
+        d_result, // result
+        1                
     ));
 
     // (X^T * W * X + 1)^-1 W^T X^T y
     CUSOLVER_CHECK(cusolverDnDpotrs(
-        handles, CUBLAS_FILL_MODE_LOWER,Ln,1,     
-        d_A, Ln, d_result, Ln, d_info
+        handles, CUBLAS_FILL_MODE_LOWER,
+        Ln, // rows of WTXTy
+        1,  // cols of WTXTy   
+        d_A, // A
+        Ln, // leading dim of A
+        d_result, 
+        Ln, 
+        d_info
     ));
 
     int info_h = 0;

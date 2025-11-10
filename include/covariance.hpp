@@ -1039,19 +1039,6 @@ inline void glmmr::Covariance::make_sparse(){
         if (i != j) matD(col_counter + j, col_counter + i) = val;
     }
 
-    /*
-#pragma omp parallel for schedule(dynamic)
-    for(int i = 0; i < dim; i++){
-      for(int j = 0; j < (i+1); j++){
-        val = get_val(b,i,j);
-        if(compact_fn && i!=j){
-          double dist = calc_[b].get_covariance_data(i,j,compact_col);
-          if(dist >= 1)val = 0;
-        }
-        matD(col_counter + i, col_counter + j) = val;
-        if (i != j) matD(col_counter + j, col_counter + i) = val;
-      }
-    }*/
     col_counter += dim;
   }
   if(!no_matl) matL.compute(matD);
@@ -1212,7 +1199,6 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   ms_double = t5 - t4;
   std::cout << "Timing (Hessian): " << ms_double.count() << "ms" << std::endl;
   VectorXd theta_curr = Map<VectorXd>(parameters_.data(), parameters_.size());
-  std::cout << "\nM:\n" << M << std::endl;
   theta_curr += M.llt().solve(grad);
   update_parameters(theta_curr.array());
 }
