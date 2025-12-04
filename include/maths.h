@@ -125,7 +125,7 @@ inline Eigen::MatrixXd mod_inv_func(const Eigen::MatrixXd& muin,
   return mu;
 }
 
-inline Eigen::VectorXd mod_inv_func(const Eigen::VectorXd& muin,
+/*inline Eigen::VectorXd mod_inv_func(const Eigen::VectorXd& muin,
     Link link)
 {
     Eigen::VectorXd mu(muin);
@@ -147,7 +147,7 @@ inline Eigen::VectorXd mod_inv_func(const Eigen::VectorXd& muin,
         break;
     }
     return mu;
-}
+}*/
 
 inline double mod_inv_func(const double& muin,
                              Link link)

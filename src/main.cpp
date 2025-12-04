@@ -154,6 +154,12 @@ int main() {
     std::vector<double> start_cov = splitStringD(config["covariance"]);
     check_in_map(config, "mean");
     std::vector<double> start_b = splitStringD(config["mean"]);
+    check_in_map(config, "tol");
+    int tol = std::stoi(config["tol"]);
+    check_in_map(config, "hist");
+    int hist = std::stoi(config["hist"]);
+    check_in_map(config, "k0");
+    int k0 = std::stoi(config["k0"]);
     //formula
 
     std::cout << "\nFormula: " << form << " nrows " << nrows << " ncols " << ncols;
@@ -183,7 +189,7 @@ int main() {
     }
     // let's do one iteration
     auto t1 = high_resolution_clock::now();
-    model.fit(niter, maxiter, (bool)start_ml_beta);
+    model.fit(niter, maxiter, (bool)start_ml_beta, tol,hist, k0);
     auto t2 = high_resolution_clock::now();
 
     duration<double, std::milli> ms_double = t2 - t1;

@@ -107,7 +107,10 @@ public:
   int                     P() const;
   int                     Q() const;
   MatrixXd                residuals(const int type, bool conditional = true);
-  void                    posterior_u_samples(const int niter, const double tol = 1e-3, const bool append = false);                  
+  void                    posterior_u_samples(const int niter,
+      const bool reml,
+      const bool loglik,
+      const bool append);
   
 private:
   std::vector<glmmr::SigmaBlock>  sigma_blocks;
@@ -1291,8 +1294,9 @@ inline VectorXd glmmr::ModelMatrix<modeltype>::log_gradient(const VectorXd &v,
 
 template<typename modeltype>
 inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
-                                                               const double tol, 
-                                                               const bool append)
+    const bool reml,
+    const bool loglik,
+    const bool append)
 {
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
@@ -1307,7 +1311,7 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   }
   ArrayXd xb = model.linear_predictor.xb().array() + model.data.offset.array();
   ArrayXd eta = xb; 
-  ArrayXd ymod(eta.size());
+  //ArrayXd ymod(eta.size());
   VectorXd W_(eta.size());
   
   switch(model.family.family){
@@ -1322,7 +1326,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     if(model.family.link == Link::logit){
       ArrayXd logitp = (eta.exp().inverse() + 1.0).inverse();
       W_ = (model.data.variance * logitp * (1- logitp)).matrix();
-      ymod = eta + (model.data.y.array() - model.data.variance * logitp) * W_.array().inverse();
     } else {
       throw std::runtime_error("Analtyic posterior only available with canonical link");
     }
@@ -1330,7 +1333,6 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
   case Fam::poisson:
     if(model.family.link == Link::loglink){
       W_ = eta.exp().matrix();
-      ymod = eta + (model.data.y.array() - eta.exp()) * W_.array().inverse();
     } else {
       throw std::runtime_error("Analtyic posterior only available with canonical link");
     }
@@ -1339,61 +1341,65 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     throw std::runtime_error("Analtyic posterior only available with Gaussian, Poisson, and Binomial");
     break;
   } 
-  
-  MatrixXd ZL = model.covariance.ZL();
-  const int n_cols = ZL.cols();
-  MatrixXd Mb(n_cols,1);
-  MatrixXd Vb(n_cols, n_cols);
-  Vb.setIdentity();
+
   model.covariance.matL.store();
+  MatrixXd ZL = model.covariance.ZL();
+  model.covariance.matL.initRandomEffectsSolve(ZL);
+  const int n_cols = ZL.cols();
+  VectorXd Mb(n_cols);
+  MatrixXd Vb(n_cols, n_cols);
+  Vb.setIdentity();  
+  Mb = re.u_mean_;
+  VectorXd bnew(Mb);
+  VectorXd u(Mb.size());
+
+  eta = maths::mod_inv_func(eta.matrix(), model.family.link).array();
+  if (model.family.family == Fam::binomial) eta.array().colwise() *= model.data.variance;
+  VectorXd resid = model.data.y - eta.matrix();
 
   auto t2 = high_resolution_clock::now();
   duration<double, std::milli> ms_double = t2 - t1;
   std::cout << "Timing (Post. U setup): " << ms_double.count() << "ms" << std::endl;
   
   if(model.family.family == Fam::gaussian) {
-    MatrixXd WZL = (ZL.array().colwise() * W_.array()).matrix();
-    MatrixXd Pb(ZL.cols(), ZL.cols());
-    MatrixXd yb(WZL.rows(), 1);
-    VectorXd r = model.data.y - xb.matrix();
-    model.covariance.matL.multCompSolve2(ZL, W_, r, Mb);
+    u.noalias() = ZL * Mb;
+    resid = model.data.y - xb.matrix();
+    model.covariance.matL.solveRandomEffects(W_, u, resid, bnew);
     model.covariance.matL.solveInPlace(Vb);
   } else {
     // // Initial setup
-        MatrixXd bnew(Mb);
-        VectorXd r(W_.size());
-        MatrixXd WZL(W_.size(), n_cols);
-        MatrixXd LWL(n_cols, n_cols);
-        MatrixXd yb(Mb.rows(), 1);
-        double diff = 1.0;
-        int itero = 0;
-
-    Mb.col(0) = re.u_.rowwise().mean();          
-    
-    while(diff > tol && itero < 10) {
-      eta = xb + (ZL * Mb.col(0)).array();
+    double diff = 1.0;
+    int itero = 0;
+    while(diff > 1e-4 && itero < 10) {
+        u.noalias() = ZL * Mb;
+        eta = xb + u.array();
       if(model.family.family == Fam::binomial || model.family.family == Fam::bernoulli) {
         ArrayXd exp_neg_eta = (-eta).exp();
         ArrayXd logitp = 1.0 / (1.0 + exp_neg_eta);
         ArrayXd var_p = model.data.variance * logitp;
         W_ = (var_p * (1.0 - logitp)).matrix();
-        ymod = (eta + (model.data.y.array() - var_p) / W_.array()).matrix();
+        eta = maths::mod_inv_func(eta.matrix(), model.family.link).array();
+        if (model.family.family == Fam::binomial) eta.array().colwise() *= model.data.variance;
+        resid = model.data.y - eta.matrix();
       } else if(model.family.family == Fam::poisson) {
-        ArrayXd exp_eta = eta.exp();
-        W_ = exp_eta.matrix();
-        ymod = (eta + (model.data.y.array() - exp_eta) / exp_eta).matrix();
+        eta = maths::mod_inv_func(eta.matrix(), model.family.link).array();
+        W_ = eta.matrix();        
+        resid = model.data.y - eta.matrix();
       }
-      r = (ymod - xb).matrix();
-      model.covariance.matL.multCompSolve2(ZL, W_, r, bnew);
-      diff = (Mb.col(0) - bnew.col(0)).array().abs().maxCoeff();
+
+      model.covariance.matL.solveRandomEffects(W_, u, resid, bnew);
+
+      diff = (Mb - bnew).array().abs().maxCoeff();
       itero++;
-      Mb.col(0) = bnew.col(0);
+      Mb.swap(bnew);
       if (Mb.array().col(0).isNaN().any()) {
           throw std::runtime_error("NaN in u from u fitting");
       }
     }
+    re.u_mean_ = Mb;
     model.covariance.matL.solveInPlace(Vb);
   }
+  model.covariance.matL.clearRandomEffectsSolve();
 
   auto t3 = high_resolution_clock::now();
   ms_double = t3 - t2;
@@ -1426,26 +1432,33 @@ inline void glmmr::ModelMatrix<modeltype>::posterior_u_samples(const int niter,
     int currcolsize = re.u_.cols();
     MatrixXd unewm(re.u_.rows(), niter);
     model.covariance.matL.productL(unew, unewm);
-    unewm.colwise() += Mb.col(0);
+    unewm.colwise() += re.u_mean_;
     re.u_.conservativeResize(NoChange,currcolsize + niter);
     re.zu_.conservativeResize(NoChange,currcolsize + niter);
     re.u_.rightCols(niter).noalias() = unewm;
   } else {
-    if(re.u_.cols() != niter){
-      re.u_.resize(NoChange, niter);
-      re.zu_.resize(NoChange, niter);
-    }
-    model.covariance.matL.productL(unew, re.u_);
-    re.u_.colwise() += Mb.col(0);
+      if (re.u_.cols() != niter) {
+          re.u_.resize(NoChange, niter);
+          re.u_solve_.resize(NoChange, niter);
+          re.scaled_u_.resize(NoChange, niter);
+          re.zu_.resize(NoChange, niter);
+          re.u_weight_.resize(niter);
+          if (loglik) re.u_loglik_.resize(niter);
+      }
+      re.u_.noalias() = unew;
+      if (loglik) {
+          MatrixXd vmat(re.u_.rows(), re.u_.cols());
+          model.covariance.matL.solve(re.u_, vmat);
+#pragma omp parallel for
+          for (int i = 0; i < re.u_.cols(); i++) {
+              re.u_loglik_(i) = -0.5 * vmat.col(i).dot(re.u_.col(i));
+          }
+      }
+      re.u_.colwise() += re.u_mean_;
   }
+  
   model.covariance.matL.reload();
-  if (ZL.rows() == ZL.cols()) {
-      re.zu_ = model.covariance.Lu(re.u_);
-  }
-  else {
-      re.zu_ = model.covariance.ZLu(re.u_);
-  }
-
+  re.update_zu(loglik);
   auto t5 = high_resolution_clock::now();
   ms_double = t5 - t4;
   std::cout << "Timing (U recalc Zu): " << ms_double.count() << "ms" << std::endl;

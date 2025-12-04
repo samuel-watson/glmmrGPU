@@ -74,17 +74,30 @@ public:
       chol_.computeAndSolve(a, x, sol);
   }
 
-  void multCompSolve(const MatrixXd& a, const MatrixXd& b, const MatrixXd& c, MatrixXd& sol) {
-      chol_.multCompSolve(a, b, c, sol);
+  void initRandomEffectsSolve(const MatrixXd& ZL) {
+      chol_.initRandomEffectsSolve(ZL);
   }
 
-  void multCompSolve2(const MatrixXd& a, const VectorXd& w, const MatrixXd& c, MatrixXd& sol) {
-      chol_.multCompSolve2(a, w, c, sol);
+  void solveRandomEffects(const Eigen::VectorXd& W, const Eigen::VectorXd& u,
+      const Eigen::VectorXd& r, Eigen::VectorXd& result) {
+      chol_.solveRandomEffects(W, u, r, result);
   }
 
-  //void solveAndMultiplyTr(const MatrixXd& B, const MatrixXd& C, double& tr_val, MatrixXd& X, MatrixXd& Y) {
-  //    chol_.solveAndMultiplyTr(B, C, tr_val, X, Y);
-  //}
+  void clearRandomEffectsSolve() {
+      chol_.clearRandomEffectsSolve();
+  }
+
+  void computeGradientHessian(
+      const std::vector<Eigen::MatrixXd>& S,
+      const Eigen::MatrixXd& vmat,
+      const Eigen::MatrixXd& umat,
+      const Eigen::ArrayXd& uweight,
+      Eigen::ArrayXd& logl,
+      Eigen::VectorXd& grad,
+      Eigen::MatrixXd& M)
+  {
+      chol_.computeGradientHessian(S, vmat, umat, uweight, logl, grad, M);
+  }
   
   MatrixXd matrixL() {
       store();
@@ -184,7 +197,8 @@ public:
   virtual SparseMatrix<double>    Z_sparse();
   strvec            parameter_names();
   virtual void      derivatives(std::vector<MatrixXd>& derivs,int order = 1);
-  virtual void      nr_step(const MatrixXd &umat, ArrayXd& logl);
+  virtual void      nr_step(const MatrixXd& umat, const MatrixXd& vmat, ArrayXd& logl, ArrayXd& gradients,
+      const ArrayXd& uweight);
   void              linear_predictor_ptr(glmmr::LinearPredictor* ptr);
   VectorXd          L_solve(const VectorXd& x);
   
@@ -208,7 +222,7 @@ public:
   CovarianceLLT                       matL;
 
 protected:
-
+  MatrixXd                            infomat_theta;
   SparseMatrix<double>                matZ;
   MatrixXd                            matD;
   int                                 n_;
@@ -243,7 +257,7 @@ protected:
 inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
-  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_), matD(Q_,Q_),
+  form_(formula), data_(data), colnames_(colnames), Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_), matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
     Z_constructor();
@@ -253,7 +267,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const ArrayXXd &data,
                                      const strvec& colnames) :
   form_(form), data_(data), colnames_(colnames),
-  Q_(parse()), matL(data.rows()),matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   Z_constructor();
 };
@@ -263,7 +277,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
     const strvec& colnames,
     const no_matl_t x) :
     form_(form), data_(data), colnames_(colnames),
-    Q_(parse()), matL(1), matZ(data_.rows(), Q_), matD(Q_, Q_), dmat_matrix(max_block_dim(), max_block_dim()),
+    Q_(parse()), matL(1), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(), Q_), matD(Q_, Q_), dmat_matrix(max_block_dim(), max_block_dim()),
     zquad(max_block_dim()) {
     Z_constructor();
     no_matl = true;
@@ -274,7 +288,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(formula), data_(data), colnames_(colnames), parameters_(parameters), 
-  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_),matD(Q_,Q_), dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -285,7 +299,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const dblvec& parameters) :
   form_(form), data_(data), colnames_(colnames), parameters_(parameters),
-  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
+  Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_), matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
   Z_constructor();
@@ -297,7 +311,7 @@ inline glmmr::Covariance::Covariance(const str& formula,
                                      const ArrayXd& parameters) :
   form_(formula), data_(data), colnames_(colnames),
   parameters_(parameters.data(),parameters.data()+parameters.size()),
-  Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_),
+  Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_),matD(Q_,Q_),
   dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -309,7 +323,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
                                      const strvec& colnames,
                                      const ArrayXd& parameters) :
   form_(form), data_(data), colnames_(colnames),
-  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matL(data.rows()), matZ(data_.rows(),Q_),
+  parameters_(parameters.data(),parameters.data()+parameters.size()),Q_(parse()), matL(data.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_),
   matD(Q_,Q_),dmat_matrix(max_block_dim(),max_block_dim()),
   zquad(max_block_dim()) {
   make_sparse();
@@ -318,7 +332,7 @@ inline glmmr::Covariance::Covariance(const glmmr::Formula& form,
 
 inline glmmr::Covariance::Covariance(const glmmr::Covariance& cov) : form_(cov.form_), data_(cov.data_),
 colnames_(cov.colnames_),
-parameters_(cov.parameters_), Q_(parse()), matL(data_.rows()), matZ(data_.rows(),Q_),matD(Q_,Q_),
+parameters_(cov.parameters_), Q_(parse()), matL(data_.rows()), infomat_theta(MatrixXd::Zero(npar(), npar())), matZ(data_.rows(),Q_),matD(Q_,Q_),
 dmat_matrix(max_block_dim(),max_block_dim()),
 zquad(max_block_dim()) {
   make_sparse();
@@ -1114,12 +1128,13 @@ inline bool glmmr::Covariance::any_log_re() const{
 }
 
 
-inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
+inline void glmmr::Covariance::nr_step(const MatrixXd& umat, const MatrixXd& vmat, ArrayXd& logl, ArrayXd& gradients,
+        const ArrayXd& uweight){
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
     using std::chrono::duration;
     using std::chrono::milliseconds;
-
+    //std::cout << "\numat: " << umat.topLeftCorner(5, 5) << std::endl;
   static const double LOG_2PI = log(2*M_PI);
   static const double NEG_HALF_LOG_2PI = -0.5 * LOG_2PI;
   auto t1 = high_resolution_clock::now();
@@ -1146,10 +1161,10 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   ms_double = t2b - t2;
   std::cout << "Timing (log-det): " << ms_double.count() << "ms" << std::endl;
   
-  std::vector<MatrixXd> S;
-  for (int i = 0; i < npars; i++)
-  {
-      S.emplace_back(derivs[i + 1].rows(), derivs[i + 1].cols());
+  // Compute S[j] = D^{-1} * derivs[j+1] and trace contribution to gradient
+  std::vector<MatrixXd> S(npars);
+  for (int i = 0; i < npars; i++) {
+      S[i].resize(derivs[i + 1].rows(), derivs[i + 1].cols());
       matL.solve(derivs[i + 1], S[i]);
       grad(i) = -0.5 * S[i].trace();
   }
@@ -1157,47 +1172,15 @@ inline void glmmr::Covariance::nr_step(const MatrixXd &umat, ArrayXd& logl){
   auto t3 = high_resolution_clock::now();
   ms_double = t3 - t2;
   std::cout << "Timing (deriv-inverse trace): " << ms_double.count() << "ms" << std::endl;
+  MatrixXd M = MatrixXd::Zero(npars, npars);
 
-  dblvec v_buffer_local(Q_);
-  MatrixXd vmat(umat.rows(), umat.cols());
-  matL.solve(umat, vmat);
-
-  VectorXd dqf_global = VectorXd::Zero(npars);
-#pragma omp parallel
-  {
-      VectorXd dqf_thread = VectorXd::Zero(npars);
-
-#pragma omp for 
-      for (int i = 0; i < niter; i++)
-      {
-          double qf = vmat.col(i).dot(umat.col(i));
-          logl(i) += -0.5 * qf;
-          for (int j = 0; j < npars; j++)
-              dqf_thread(j) += umat.col(i).dot(S[j] * vmat.col(i)); 
-      }
-
-#pragma omp critical
-      dqf_global += dqf_thread;
-  }
-
-  auto t4 = high_resolution_clock::now();
-  ms_double = t4 - t3;
-  std::cout << "Timing (nr quad form): " << ms_double.count() << "ms" << std::endl;
-
-  for (int j = 0; j < npars; j++) dqf[j] += dqf_global(j);
-  const double niter_inv = 1.0 / (double)niter;
-  for (int j = 0; j < npars; j++) grad(j) += 0.5 * dqf[j] * niter_inv;
-  MatrixXd M(npars, npars);
-  for (int j = 0; j < npars; j++) {
-      for (int k = j; k < npars; k++) {
-          double val = (S[j].array() * S[k].array()).sum();
-          M(j, k) = 0.5 * val;
-          if (j != k) M(k, j) = 0.5 * val;
-      }
-  }
+  matL.computeGradientHessian(S, vmat, umat, uweight, logl, grad, M);
+    
+  gradients.tail(grad.size()) = grad;
+  infomat_theta = M;
   auto t5 = high_resolution_clock::now();
-  ms_double = t5 - t4;
-  std::cout << "Timing (Hessian): " << ms_double.count() << "ms" << std::endl;
+  ms_double = t5 - t3;
+  std::cout << "Timing (GPU grad/Hessian): " << ms_double.count() << "ms" << std::endl;
   VectorXd theta_curr = Map<VectorXd>(parameters_.data(), parameters_.size());
   theta_curr += M.llt().solve(grad);
   update_parameters(theta_curr.array());
@@ -1228,42 +1211,48 @@ inline void glmmr::Covariance::derivatives(std::vector<MatrixXd>& derivs,
         std::cout << "OpenMP using " << omp_get_num_threads() << " threads" << std::endl;
     }
 
-#pragma omp parallel for 
-    for (int idx = 1; idx <= block_dimension * (block_dimension + 1) / 2; idx++) {
+#pragma omp parallel 
+    {
         dblvec out(matrix_n);
-        double p = (sqrt(8.0 * idx + 1) - 1) / 2;
-        int i = (int)p;
-        int j;
-        if (i == p) {
-            i--;
-            j = i;
-        }
-        else {
-            j = idx - i * (i + 1) / 2 - 1;            
-        }
-        if(order == 1){
-          out = calc_[b].calculate<CalcDyDx::BetaFirst>(i,j,0,0);
-        } else {
-          out = calc_[b].calculate<CalcDyDx::BetaSecond>(i,j,0,0);
-        }
-        derivs[0](block_count+i,block_count+j) = out[0];
-        if(i!=j)derivs[0](block_count+j,block_count+i) = out[0];
-        int index_count = R_block + 1;
-        for(int k = 0; k < R_block; k++){
-          derivs[par_index[k]+1](block_count+i,block_count+j) = out[k+1];
-          if(i!=j)derivs[par_index[k]+1](block_count+j,block_count+i) = out[k+1];
-          //second order derivatives
-          if(order >= 2){
-            for(int l=k; l < R_block; l++){
-              int second_pos = par_index[l]*(R-1) - par_index[l]*(par_index[l]-1)/2 + par_index[k];
-              derivs[R+1+second_pos](block_count+i,block_count+j) = out[index_count];
-              if(i!=j)derivs[R+1+second_pos](block_count+j,block_count+i) = out[index_count];
-              index_count++;
+#pragma omp for 
+        for (int idx = 1; idx <= block_dimension * (block_dimension + 1) / 2; idx++) {            
+            double p = (sqrt(8.0 * idx + 1) - 1) / 2;
+            int i = (int)p;
+            int j;
+            if (i == p) {
+                i--;
+                j = i;
             }
-          }
+            else {
+                j = idx - i * (i + 1) / 2 - 1;
+            }
+            if (order == 1) {
+                out = calc_[b].calculate<CalcDyDx::BetaFirst>(i, j, 0, 0);
+            }
+            else {
+                out = calc_[b].calculate<CalcDyDx::BetaSecond>(i, j, 0, 0);
+            }
+            derivs[0](block_count + i, block_count + j) = out[0];
+            if (i != j)derivs[0](block_count + j, block_count + i) = out[0];
+            int index_count = R_block + 1;
+            for (int k = 0; k < R_block; k++) {
+                derivs[par_index[k] + 1](block_count + i, block_count + j) = out[k + 1];
+                if (i != j)derivs[par_index[k] + 1](block_count + j, block_count + i) = out[k + 1];
+                //second order derivatives
+                if (order >= 2) {
+                    for (int l = k; l < R_block; l++) {
+                        int second_pos = par_index[l] * (R - 1) - par_index[l] * (par_index[l] - 1) / 2 + par_index[k];
+                        derivs[R + 1 + second_pos](block_count + i, block_count + j) = out[index_count];
+                        if (i != j)derivs[R + 1 + second_pos](block_count + j, block_count + i) = out[index_count];
+                        index_count++;
+                    }
+                }
+            }
+
         }
-      
     }
+    
+    
     block_count += block_dimension;
   }
 }

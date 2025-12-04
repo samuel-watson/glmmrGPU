@@ -41,7 +41,7 @@ public:
   virtual void    update_u(const MatrixXd &u_, bool append = false);
   virtual void    reset_u(); // just resets the random effects samples to zero
   virtual void    set_trace(int trace_);
-  void            fit(const int niter, const int max_iter, const bool start_ml_beta = true);
+  void            fit(const int niter, const int max_iter, const bool start_ml_beta, const double tol, const int hist, const int k0);
   virtual dblpair marginal(const MarginType type,
                              const std::string& x,
                              const strvec& at,
@@ -154,7 +154,7 @@ inline void glmmr::Model<modeltype>::set_trace(int trace_){
 }
 
 template<typename modeltype>
-inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, const bool start_ml_beta)
+inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, const bool start_ml_beta, const double tol, const int hist,const int k0)
 {
     using std::chrono::high_resolution_clock;
     using std::chrono::duration_cast;
@@ -174,7 +174,7 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
     while (!converged && iter <= max_iter) {
         std::cout << "\n-------------- ITER: " << iter << " ------------" << std::endl;
         auto t1 = high_resolution_clock::now();
-        matrix.posterior_u_samples(niter);
+        matrix.posterior_u_samples(niter,false,true,false);
         auto t2 = high_resolution_clock::now();
         duration<double, std::milli> ms_double = t2 - t1;
         std::cout << "TIMING STEP 1 (posterior u sample): " << ms_double.count() << "ms" << std::endl;
@@ -188,18 +188,11 @@ inline void glmmr::Model<modeltype>::fit(const int niter, const int max_iter, co
         std::cout << "TIMING STEP 3 (nr theta): " << ms_double.count() << "ms" << std::endl;
         beta = Map<VectorXd>(model.linear_predictor.parameters.data(), model.linear_predictor.parameters.size());
         theta = Map<VectorXd>(model.covariance.parameters_.data(), model.covariance.parameters_.size());
-        ll = optim.current_likelihood_values();
         std::cout << "\nBeta: " << beta.transpose() << "\ntheta: " << theta.transpose();
         std::cout << "\nu: " << re.u_.topRows(5).rowwise().mean().transpose();
         std::cout << "\nLog-likelihood: " << ll.first << " | " << ll.second << std::endl;
-        if (iter > 1) {
-            lldiff = optim.u_diagnostic();
-            llvartot = optim.ll_diff_variance(true, true);
-            std::cout << "\nLog-likelihood differences: " << lldiff.first << " | " << lldiff.second;
-            lltot = lldiff.first + lldiff.second;
-            converged = lltot + 1.96 * sqrt(llvartot) / sqrt((double)niter) < 0;
-            prob = 1.0 - 0.5 * erfc(-1.0 * M_SQRT1_2 * lltot / sqrt(llvartot / (double)niter));
-            std::cout << "\nLog-likelihood variance: " << llvartot << " | Probability: " << prob*100 << "%" << std::endl;
+        if (iter > 2) {
+            converged = optim.check_convergence(tol,hist,iter,k0);
             if (converged) std::cout << "\nCONVERGED!";
         }
         iter++;
